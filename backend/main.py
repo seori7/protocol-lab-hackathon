@@ -1,23 +1,19 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import router as api_router
+from api import routes
 
-app = FastAPI(
-    title="Protocol Analyzer API",
-    description="Backend for Reverse Engineering Network Protocols Boilerplate",
-    version="1.0.0"
-)
+app = FastAPI(title="Protocol Lab Backend")
 
-# ОБЯЗАТЕЛЬНО настрой CORS Middleware
+# Настройка CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # Порт фронтенда по умолчанию
+    allow_origins=["http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(api_router, prefix="/api")
+app.include_router(routes.router, prefix="/api")
 
 if __name__ == "__main__":
     import uvicorn
