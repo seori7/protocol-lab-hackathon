@@ -31,27 +31,55 @@ async def upload_pcap(file: UploadFile = File(...)):
     return {"project_id": project_id, "filename": file.filename}
 
 
-@router.get("/project/{project_id}/packets")
-async def get_packets(project_id: str):
+@router.get("/project/{project_id}/sessions")
+async def get_sessions(project_id: str):
+    """
+    Возвращает список всех TCP-сессий в файле.
+    """
+    target_file = _get_file_path(project_id)
+    
+    try:
+        sessions_dict = await run_in_threadpool(PcapParser.extract_tcp_sessions, target_file)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+        
+    # Возвращаем метаданные
+    sessions_list = [
+        {"id": s["id"], "endpoints": s["endpoints"], "packet_count": len(s["packets"])} 
+        for s in sessions_dict.values()
+    ]
+    return {"sessions": sessions_list}
+
+
+@router.get("/project/{project_id}/sessions/{session_id}/packets")
+async def get_session_packets(project_id: str, session_id: str):
+    """
+    Возвращает очищенные пакеты для конкретной сессии.
+    """
+    target_file = _get_file_path(project_id)
+    
+    try:
+        sessions_dict = await run_in_threadpool(PcapParser.extract_tcp_sessions, target_file)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+        
+    # Выносим проверку 404 за пределы блока try-except, чтобы она не превращалась в 500
+    if session_id not in sessions_dict:
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+        
+    return {"packets": sessions_dict[session_id]["packets"]}
+
+# Вспомогательная функция, чтобы не дублировать код поиска файла
+def _get_file_path(project_id: str) -> str:
     file_path_pcap = os.path.join(UPLOAD_DIR, f"{project_id}.pcap")
     file_path_pcapng = os.path.join(UPLOAD_DIR, f"{project_id}.pcapng")
     
-    target_file = None
     if os.path.exists(file_path_pcap):
-        target_file = file_path_pcap
-    elif os.path.exists(file_path_pcapng):
-        target_file = file_path_pcapng
+        return file_path_pcap
+    if os.path.exists(file_path_pcapng):
+        return file_path_pcapng
         
-    if not target_file:
-        raise HTTPException(status_code=404, detail="Проект или файл не найден")
-
-    try:
-        # АРХИТЕКТУРНЫЙ ФИКС:
-        # Запускаем pyshark в отдельном потоке (Thread), чтобы он не ломал event loop FastAPI
-        packets = await run_in_threadpool(PcapParser.extract_tcp_streams, target_file)
-        return {"packets": packets}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка парсинга: {str(e)}")
+    raise HTTPException(status_code=404, detail="Проект или файл не найден")
 
 
 @router.post("/project/{project_id}/apply_rules")
