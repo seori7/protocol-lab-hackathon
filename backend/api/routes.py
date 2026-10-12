@@ -4,84 +4,56 @@ import shutil
 import os
 import uuid
 from services.parser import PcapParser
-
-# НОВЫЙ ИМПОРТ:
 from starlette.concurrency import run_in_threadpool
+from services.rule_engine import RuleEngine
 
 router = APIRouter()
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# --- МОДЕЛИ И ЭНДПОИНТ ДЛЯ ПРАВИЛ ---
+
+class RuleDef(BaseModel):
+    id: str
+    name: str
+    offset: int
+    length: int
+    data_type: str
+    endianness: str = "big"
+
 class RuleApplyRequest(BaseModel):
-    rules: list
+    rules: list[RuleDef]
+    payloads: list[str] # Массив hex-строк пакетов, которые мы хотим проверить
 
-@router.post("/project/upload")
-async def upload_pcap(file: UploadFile = File(...)):
-    if not file.filename.endswith(('.pcap', '.pcapng')):
-        raise HTTPException(status_code=400, detail="Формат файла должен быть .pcap или .pcapng")
-
-    project_id = str(uuid.uuid4())
-    file_extension = os.path.splitext(file.filename)[1]
-    safe_filename = f"{project_id}{file_extension}"
-    file_path = os.path.join(UPLOAD_DIR, safe_filename)
-
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
-    return {"project_id": project_id, "filename": file.filename}
-
-
-@router.get("/project/{project_id}/sessions")
-async def get_sessions(project_id: str):
+@router.post("/project/apply_rules")
+async def apply_rules(request: RuleApplyRequest):
     """
-    Возвращает список всех TCP-сессий в файле.
+    Универсальный эндпоинт. Берет массив пакетов и прогоняет их через массив правил.
+    Возвращает расшифрованные значения или ошибки (контрпримеры).
     """
-    target_file = _get_file_path(project_id)
-    
-    try:
-        sessions_dict = await run_in_threadpool(PcapParser.extract_tcp_sessions, target_file)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    results = []
+
+    for payload in request.payloads:
+        packet_result = {"payload": payload, "matches": []}
         
-    # Возвращаем метаданные
-    sessions_list = [
-        {"id": s["id"], "endpoints": s["endpoints"], "packet_count": len(s["packets"])} 
-        for s in sessions_dict.values()
-    ]
-    return {"sessions": sessions_list}
+        for rule in request.rules:
+            # Отправляем данные в наш Движок Интерпретаций
+            match = RuleEngine.parse_bytes(
+                payload_hex=payload,
+                offset=rule.offset,
+                length=rule.length,
+                data_type=rule.data_type,
+                endianness=rule.endianness
+            )
+            
+            packet_result["matches"].append({
+                "rule_id": rule.id,
+                "rule_name": rule.name,
+                "success": match["success"],
+                "value": match["value"],
+                "error": match["error"]
+            })
+            
+        results.append(packet_result)
 
-
-@router.get("/project/{project_id}/sessions/{session_id}/packets")
-async def get_session_packets(project_id: str, session_id: str):
-    """
-    Возвращает очищенные пакеты для конкретной сессии.
-    """
-    target_file = _get_file_path(project_id)
-    
-    try:
-        sessions_dict = await run_in_threadpool(PcapParser.extract_tcp_sessions, target_file)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-        
-    # Выносим проверку 404 за пределы блока try-except, чтобы она не превращалась в 500
-    if session_id not in sessions_dict:
-        raise HTTPException(status_code=404, detail="Сессия не найдена")
-        
-    return {"packets": sessions_dict[session_id]["packets"]}
-
-# Вспомогательная функция, чтобы не дублировать код поиска файла
-def _get_file_path(project_id: str) -> str:
-    file_path_pcap = os.path.join(UPLOAD_DIR, f"{project_id}.pcap")
-    file_path_pcapng = os.path.join(UPLOAD_DIR, f"{project_id}.pcapng")
-    
-    if os.path.exists(file_path_pcap):
-        return file_path_pcap
-    if os.path.exists(file_path_pcapng):
-        return file_path_pcapng
-        
-    raise HTTPException(status_code=404, detail="Проект или файл не найден")
-
-
-@router.post("/project/{project_id}/apply_rules")
-async def apply_rules(project_id: str, request: RuleApplyRequest):
-    return {"status": "success", "matched_packets": len(request.rules)}
+    return {"status": "success", "results": results}
