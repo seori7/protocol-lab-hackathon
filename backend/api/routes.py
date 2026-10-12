@@ -10,6 +10,7 @@ from starlette.concurrency import run_in_threadpool
 from services.parser import PcapParser
 from services.rule_engine import RuleEngine
 from services.exporter import ParserGenerator
+from services.infosec import InfoSecAnalyzer
 
 router = APIRouter()
 
@@ -140,6 +141,12 @@ async def export_parser(request: ExportRequest):
         return {"status": "success", "script": script_code}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@router.get("/infosec/signatures")
+async def get_signatures(payload_hex: str):
+    """Определяет тип данных по первым байтам."""
+    detected = InfoSecAnalyzer.detect_signatures(payload_hex)
+    return {"signatures": detected}
 
 # ==========================================
 # УТИЛИТЫ
@@ -224,3 +231,29 @@ async def validate_corpus_rules(project_id: str, session_id: str, request: Valid
         })
 
     return report
+
+# --- ИБ-ИНСТРУМЕНТЫ (Расширение ТЗ) ---
+
+class DiffRequest(BaseModel):
+    payload_a: str
+    payload_b: str
+
+@router.get("/infosec/entropy")
+async def get_entropy(payload_hex: str):
+    """
+    Рассчитывает энтропию полезной нагрузки. 
+    > 7.5 - вероятно шифрование или сжатие.
+    """
+    entropy = InfoSecAnalyzer.calculate_entropy(payload_hex)
+    return {
+        "entropy": round(entropy, 2),
+        "is_encrypted": entropy > 7.5
+    }
+
+@router.post("/infosec/diff")
+async def get_diff(request: DiffRequest):
+    """
+    Побайтовое сравнение двух пакетов (Визуальный Diff).
+    """
+    diff_result = InfoSecAnalyzer.diff_payloads(request.payload_a, request.payload_b)
+    return diff_result
