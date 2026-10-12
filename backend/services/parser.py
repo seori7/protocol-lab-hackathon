@@ -5,80 +5,83 @@ from scapy.packet import Raw
 
 class PcapParser:
     """
-    Класс для разбора PCAP и восстановления TCP-сессий.
+    Класс для разбора PCAP, восстановления TCP-сессий и поиска сетевых аномалий.
     """
 
     @staticmethod
     def extract_tcp_sessions(filepath: str) -> dict:
-        """
-        Читает файл и группирует пакеты по TCP-сессиям.
-        Возвращает словарь: { "session_id": { "metadata": {...}, "packets": [...] } }
-        """
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"Файл {filepath} не найден.")
 
-        # Словарь для хранения сессий
         sessions = {}
         
         try:
             with PcapReader(filepath) as pcap_reader:
                 for packet in pcap_reader:
-                    # Пакет должен иметь слои IP, TCP и полезную нагрузку (Raw)
                     if packet.haslayer(IP) and packet.haslayer(TCP) and packet.haslayer(Raw):
+                        ip_src, ip_dst = packet[IP].src, packet[IP].dst
+                        port_src, port_dst = int(packet[TCP].sport), int(packet[TCP].dport)
+                        seq = int(packet[TCP].seq)
                         
-                        ip_src = packet[IP].src
-                        ip_dst = packet[IP].dst
-                        port_src = int(packet[TCP].sport)
-                        port_dst = int(packet[TCP].dport)
-                        seq = int(packet[TCP].seq) # Порядковый номер пакета
-                        
-                        raw_bytes = packet[Raw].load
+                        raw_bytes = bytes(packet[Raw].load)
                         raw_hex = raw_bytes.hex()
+                        payload_len = len(raw_bytes)
                         
-                        # Создаем уникальный ID сессии. 
-                        # Сортируем IP и порты, чтобы запросы "Туда" и "Обратно" попали в одну сессию
                         endpoint1 = f"{ip_src}:{port_src}"
                         endpoint2 = f"{ip_dst}:{port_dst}"
                         session_id = f"{min(endpoint1, endpoint2)}<->{max(endpoint1, endpoint2)}"
-
-                        # Направление (кто клиент, кто сервер). 
-                        # Обычно клиент тот, чей порт больше (динамический порт)
                         direction = "client_to_server" if port_src > port_dst else "server_to_client"
 
-                        # Если это новая сессия, создаем для нее структуру
                         if session_id not in sessions:
-                            sessions[session_id] = {
-                                "id": session_id,
-                                "endpoints": [endpoint1, endpoint2],
-                                "packets": []
-                            }
+                            sessions[session_id] = {"id": session_id, "endpoints": [endpoint1, endpoint2], "packets": []}
 
-                        # Добавляем пакет в сессию
                         sessions[session_id]["packets"].append({
                             "timestamp": float(packet.time),
                             "direction": direction,
                             "seq": seq,
+                            "payload_len": payload_len,
                             "payload_hex": raw_hex,
-                            "applied_rules": []
+                            "anomaly": None # Поле для записи проблем
                         })
 
-            # ПОСТОБРАБОТКА СЕССИЙ (Выполняем требование R1 из ТЗ)
+            # --- ИНТЕЛЛЕКТУАЛЬНАЯ ПОСТОБРАБОТКА (TCP Reassembly & Anomaly Detection) ---
             for s_id, session_data in sessions.items():
-                # 1. Сортируем пакеты по времени, а при равном времени - по Sequence Number (seq)
+                # 1. Сортируем пакеты
                 session_data["packets"].sort(key=lambda x: (x["timestamp"], x["seq"]))
                 
-                # 2. Удаляем дубликаты (одинаковые seq в одном направлении - это TCP Retransmission)
                 unique_packets = []
-                seen_seqs = { "client_to_server": set(), "server_to_client": set() }
+                # Словари для отслеживания: какой seq мы ожидаем увидеть следующим
+                expected_seqs = { "client_to_server": None, "server_to_client": None }
+                # Словарь для поиска конфликтов (когда на один seq приходят РАЗНЫЕ данные)
+                seen_payloads = { "client_to_server": {}, "server_to_client": {} }
                 
-                # Переназначаем ID пакетам по порядку
                 packet_counter = 1
                 for pkt in session_data["packets"]:
-                    if pkt["seq"] not in seen_seqs[pkt["direction"]]:
-                        seen_seqs[pkt["direction"]].add(pkt["seq"])
-                        pkt["id"] = packet_counter
-                        unique_packets.append(pkt)
-                        packet_counter += 1
+                    dir_key = pkt["direction"]
+                    current_seq = pkt["seq"]
+                    hex_data = pkt["payload_hex"]
+                    
+                    # Проверка на дубликаты и конфликты (Требование файла 05_conflicting_overlap)
+                    if current_seq in seen_payloads[dir_key]:
+                        if seen_payloads[dir_key][current_seq] != hex_data:
+                            pkt["anomaly"] = "conflicting_overlap (Конфликт данных)"
+                            # Оставляем конфликтный пакет в списке для анализа
+                        else:
+                            continue # Обычный дубликат (retransmission), игнорируем
+                    else:
+                        seen_payloads[dir_key][current_seq] = hex_data
+
+                    # Проверка на пропущенные сегменты (Требование файла 03_missing_segment)
+                    if expected_seqs[dir_key] is not None:
+                        if current_seq > expected_seqs[dir_key]:
+                            pkt["anomaly"] = f"missing_segment (Потеряно {current_seq - expected_seqs[dir_key]} байт)"
+                    
+                    # Вычисляем, какой seq должен быть у следующего пакета
+                    expected_seqs[dir_key] = current_seq + pkt["payload_len"]
+
+                    pkt["id"] = packet_counter
+                    unique_packets.append(pkt)
+                    packet_counter += 1
                         
                 session_data["packets"] = unique_packets
 
