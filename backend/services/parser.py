@@ -1,88 +1,157 @@
-import os
-from scapy.utils import PcapReader
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
 from scapy.layers.inet import IP, TCP
-from scapy.packet import Raw
+from scapy.utils import PcapReader
+
+
+TCP_FLAG_FIN = 0x01
+TCP_FLAG_SYN = 0x02
+TCP_FLAG_RST = 0x04
+TCP_FLAG_ACK = 0x10
+
+
+Endpoint = tuple[str, int]
+EndpointPair = tuple[Endpoint, Endpoint]
+
+
+@dataclass
+class ActiveConnection:
+    """Один наблюдаемый экземпляр TCP-соединения."""
+
+    session: dict[str, Any]
+    first_sender: Endpoint
+    initial_syn_seq: int | None
+    closed: bool = False
+
+
+def make_endpoint_pair(source: Endpoint, destination: Endpoint) -> EndpointPair:
+    """Создаёт одинаковый ключ для обоих направлений обмена."""
+    first, second = sorted((source, destination))
+    return first, second
+
 
 class PcapParser:
-    """
-    Класс для разбора PCAP и восстановления TCP-сессий через библиотеку Scapy.
+    """Извлекает TCP-сессии и исходные payload-сегменты из PCAP/PCAPNG.
+
+    ВАЖНО: возвращаемые packets — не восстановленные прикладные сообщения.
+    Правильное восстановление потока по sequence numbers будет отдельным шагом.
     """
 
     @staticmethod
-    def extract_tcp_sessions(filepath: str) -> dict:
-        """
-        Читает файл и группирует пакеты по TCP-сессиям.
-        Возвращает словарь: { "session_id": { "metadata": {...}, "packets": [...] } }
-        """
-        if not os.path.exists(filepath):
+    def extract_tcp_sessions(filepath: str) -> dict[str, dict[str, Any]]:
+        capture_path = Path(filepath)
+        if not capture_path.is_file():
             raise FileNotFoundError(f"Файл {filepath} не найден.")
 
-        # Словарь для хранения сессий
-        sessions = {}
-        
+        sessions: dict[str, dict[str, Any]] = {}
+        active_connections: dict[EndpointPair, ActiveConnection] = {}
+        connection_counter = 0
+
         try:
-            # PcapReader читает файл потоково, не забивая оперативную память
-            with PcapReader(filepath) as pcap_reader:
-                for packet in pcap_reader:
-                    # Пакет должен иметь слои IP, TCP и полезную нагрузку (Raw)
-                    if packet.haslayer(IP) and packet.haslayer(TCP) and packet.haslayer(Raw):
-                        
-                        ip_src = packet[IP].src
-                        ip_dst = packet[IP].dst
-                        port_src = int(packet[TCP].sport)
-                        port_dst = int(packet[TCP].dport)
-                        seq = int(packet[TCP].seq) 
-                        
-                        raw_bytes = packet[Raw].load
-                        raw_hex = raw_bytes.hex().upper() # Фронтенд ждет HEX в верхнем регистре
-                        
-                        # Создаем уникальный ID сессии
-                        endpoint1 = f"{ip_src}:{port_src}"
-                        endpoint2 = f"{ip_dst}:{port_dst}"
-                        session_id = f"{min(endpoint1, endpoint2)}<->{max(endpoint1, endpoint2)}"
-                        
-                        # Направление
-                        direction = "client_to_server" if port_src > port_dst else "server_to_client"
+            with PcapReader(str(capture_path)) as reader:
+                for frame_number, frame in enumerate(reader, start=1):
+                    if not frame.haslayer(IP) or not frame.haslayer(TCP):
+                        continue
 
-                        # Инициализируем сессию, если её еще нет
-                        if session_id not in sessions:
-                            sessions[session_id] = {
-                                "id": session_id,
-                                "endpoints": [endpoint1, endpoint2],
-                                "packets": []
+                    ip = frame[IP]
+                    tcp = frame[TCP]
+
+                    source: Endpoint = (str(ip.src), int(tcp.sport))
+                    destination: Endpoint = (str(ip.dst), int(tcp.dport))
+                    endpoint_pair = make_endpoint_pair(source, destination)
+
+                    flags = int(tcp.flags)
+                    sequence_number = int(tcp.seq)
+
+                    is_initial_syn = bool(flags & TCP_FLAG_SYN) and not bool(
+                        flags & TCP_FLAG_ACK
+                    )
+
+                    connection = active_connections.get(endpoint_pair)
+
+                    is_repeated_syn = (
+                        connection is not None
+                        and not connection.closed
+                        and is_initial_syn
+                        and source == connection.first_sender
+                        and sequence_number == connection.initial_syn_seq
+                    )
+
+                    if connection is None or (
+                        is_initial_syn and not is_repeated_syn
+                    ):
+                        connection_counter += 1
+                        session_id = f"tcp-{connection_counter}"
+
+                        role_status = (
+                            "syn_observed" if is_initial_syn else "unknown"
+                        )
+
+                        session: dict[str, Any] = {
+                            "id": session_id,
+                            "endpoints": [
+                                f"{source[0]}:{source[1]}",
+                                f"{destination[0]}:{destination[1]}",
+                            ],
+                            "first_frame_number": frame_number,
+                            "role_status": role_status,
+                            "warning": (
+                                None
+                                if is_initial_syn
+                                else (
+                                    "Начало TCP-соединения не наблюдалось. "
+                                    "Обозначения C/S условные."
+                                )
+                            ),
+                            "packets": [],
+                        }
+
+                        sessions[session_id] = session
+                        connection = ActiveConnection(
+                            session=session,
+                            first_sender=source,
+                            initial_syn_seq=(
+                                sequence_number if is_initial_syn else None
+                            ),
+                        )
+                        active_connections[endpoint_pair] = connection
+
+                    assert connection is not None
+
+                    payload = bytes(tcp.payload)
+                    if payload:
+                        direction = (
+                            "client_to_server"
+                            if source == connection.first_sender
+                            else "server_to_client"
+                        )
+
+                        packet_id = len(connection.session["packets"]) + 1
+
+                        connection.session["packets"].append(
+                            {
+                                "id": packet_id,
+                                "frame_number": frame_number,
+                                "timestamp": float(frame.time),
+                                "direction": direction,
+                                "seq": sequence_number,
+                                "payload_len": len(payload),
+                                "payload_hex": payload.hex().upper(),
+                                "anomaly": None,
+                                "applied_rules": [],
                             }
+                        )
 
-                        # Добавляем пакет
-                        sessions[session_id]["packets"].append({
-                            "timestamp": float(packet.time),
-                            "direction": direction,
-                            "seq": seq,
-                            "payload_hex": raw_hex,
-                            "anomaly": None, # Место для будущей бизнес-логики
-                            "applied_rules": []
-                        })
+                    if flags & (TCP_FLAG_FIN | TCP_FLAG_RST):
+                        connection.closed = True
 
-            # ПОСТОБРАБОТКА СЕССИЙ (Требование R1 из ТЗ - сортировка и удаление дубликатов)
-            for s_id, session_data in sessions.items():
-                # 1. Сортируем пакеты по времени, а при равном времени - по Sequence Number
-                session_data["packets"].sort(key=lambda x: (x["timestamp"], x["seq"]))
-                
-                # 2. Удаляем TCP-дубликаты (Retransmissions)
-                unique_packets = []
-                seen_seqs = { "client_to_server": set(), "server_to_client": set() }
-                
-                # Переназначаем ID пакетам по порядку
-                packet_counter = 1
-                for pkt in session_data["packets"]:
-                    if pkt["seq"] not in seen_seqs[pkt["direction"]]:
-                        seen_seqs[pkt["direction"]].add(pkt["seq"])
-                        pkt["id"] = packet_counter
-                        unique_packets.append(pkt)
-                        packet_counter += 1
-                        
-                session_data["packets"] = unique_packets
-
-        except Exception as e:
-            raise RuntimeError(f"Ошибка чтения PCAP: {str(e)}")
+        except Exception as exc:
+            raise RuntimeError(
+                f"Ошибка чтения PCAP/PCAPNG {capture_path.name}: {exc}"
+            ) from exc
 
         return sessions
