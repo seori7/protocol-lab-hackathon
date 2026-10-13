@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.routes import router as api_router
+from api.streams import router as streams_router
 
 app = FastAPI(
     title="Protocol Analyzer API",
@@ -8,7 +9,6 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# ОБЯЗАТЕЛЬНО настрой CORS Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],  # Порт фронтенда по умолчанию
@@ -18,6 +18,7 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api")
+app.include_router(streams_router, prefix="/api")
 
 if __name__ == "__main__":
     import uvicorn
