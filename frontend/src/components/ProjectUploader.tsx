@@ -1,123 +1,32 @@
 import { useState, useRef, type FC, type ChangeEvent, type DragEvent } from 'react';
 import type { ProjectUploaderProps } from '../types';
 import { uploadPcapFile, ApiError } from '../api/client';
-import {
-  UPLOAD_INPUT_ACCEPT, UPLOAD_ALLOWED_EXTENSIONS,
-  MAX_UPLOAD_FILE_SIZE_BYTES, BYTES_PER_MB,
-} from '../constants/api';
+import { UPLOAD_INPUT_ACCEPT, UPLOAD_ALLOWED_EXTENSIONS, MAX_UPLOAD_FILE_SIZE_BYTES, BYTES_PER_MB } from '../constants/api';
+import { UploadIcon } from './icons';
 import { cn } from '../utils/cn';
-
-export const ProjectUploader: FC<ProjectUploaderProps> = ({
-  onUploadSuccess, currentFilename, backendStatus,
-}) => {
-  const [isDragging, setIsDragging] = useState<boolean>(false);
-  const [isUploading, setIsUploading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const openFileDialog = (): void => {
-    fileInputRef.current?.click();
-  };
-
-  const validateFile = (file: File): string | null => {
-    const lower = file.name.toLowerCase();
-    const extOk = UPLOAD_ALLOWED_EXTENSIONS.some((ext) => lower.endsWith(ext));
-    if (!extOk) return `Неверный формат "${file.name}". Нужен .pcap или .pcapng`;
-    if (file.size > MAX_UPLOAD_FILE_SIZE_BYTES) {
-      const sizeMb = (file.size / BYTES_PER_MB).toFixed(1);
-      const maxMb = (MAX_UPLOAD_FILE_SIZE_BYTES / BYTES_PER_MB).toFixed(0);
-      return `Файл ${sizeMb} МБ превышает лимит ${maxMb} МБ`;
-    }
-    return null;
-  };
-
-  const processFile = async (file: File): Promise<void> => {
-    const validationError = validateFile(file);
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-    setError(null);
-    setIsUploading(true);
-    try {
-      const res = await uploadPcapFile(file);
-      onUploadSuccess(res.project_id, res.filename || file.name);
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : 'Ошибка загрузки файла';
-      setError(message);
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
-  const handleInputChange = (e: ChangeEvent<HTMLInputElement>): void => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (file) void processFile(file);
-  };
-
-  const handleDrop = (e: DragEvent<HTMLDivElement>): void => {
-    e.preventDefault();
-    setIsDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file && !isUploading) void processFile(file);
-  };
-
-  const isLive = backendStatus === 'live';
-
-  return (
-    <div
-      className="relative"
-      onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-      onDragLeave={() => setIsDragging(false)}
-      onDrop={handleDrop}
-    >
-      <div className="flex items-center gap-2">
-        {/* Индикатор: зеленый = live бэкенд, янтарный = моки */}
-        <span
-          title={isLive ? 'Подключено к бэкенду' : 'Демо-режим (моки)'}
-          className={cn('w-2 h-2 rounded-full shrink-0', isLive ? 'bg-emerald-400' : 'bg-amber-400')}
-        />
-        <span
-          title={currentFilename ?? 'Файл не загружен'}
-          className="text-xs font-mono text-slate-400 max-w-[180px] truncate hidden md:inline"
-        >
-          {currentFilename ?? 'demo'}
-        </span>
-        <button
-          type="button"
-          onClick={openFileDialog}
-          disabled={isUploading}
-          title="Загрузить .pcap/.pcapng (можно перетащить файл)"
-          className={cn(
-            'text-xs font-medium px-3 py-1.5 rounded-md border transition-colors cursor-pointer',
-            isUploading
-              ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-wait'
-              : 'bg-slate-800 text-slate-200 border-slate-700 hover:border-blue-500 hover:text-white'
-          )}
-        >
-          {isUploading ? 'Загрузка...' : '⬆ Загрузить PCAP'}
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept={UPLOAD_INPUT_ACCEPT}
-          onChange={handleInputChange}
-          className="hidden"
-        />
-      </div>
-
-      {error && (
-        <div
-          title={error}
-          className="absolute top-full mt-1 right-0 max-w-[280px] truncate text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded px-2 py-1 z-20"
-        >
-          {error}
-        </div>
-      )}
-      {isDragging && (
-        <div className="absolute -inset-2 rounded-lg border-2 border-dashed border-blue-500 bg-blue-500/10 pointer-events-none z-10" />
-      )}
-    </div>
-  );
+export const ProjectUploader: FC<ProjectUploaderProps> = ({ onUploadSuccess, currentFilename, backendStatus }) => {
+const [drag, setDrag] = useState(false); const [busy, setBusy] = useState(false); const [err, setErr] = useState<string | null>(null);
+const ref = useRef<HTMLInputElement>(null);
+const live = backendStatus === 'live';
+const check = (f: File): string | null => {
+const lw = f.name.toLowerCase(); if (!UPLOAD_ALLOWED_EXTENSIONS.some((e) => lw.endsWith(e))) return `Неверный формат "${f.name}" — нужен .pcap`;
+if (f.size > MAX_UPLOAD_FILE_SIZE_BYTES) return `Файл ${(f.size / BYTES_PER_MB).toFixed(1)} МБ превышает лимит`; return null;
+};
+const run = async (f: File): Promise<void> => { const v = check(f); if (v) { setErr(v); return; } setErr(null); setBusy(true);
+try { const r = await uploadPcapFile(f); onUploadSuccess(r.project_id, r.filename || f.name); }
+catch (e) { setErr(e instanceof ApiError ? e.message : 'Ошибка загрузки'); } finally { setBusy(false); } };
+return (
+<div className="relative font-sans" onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
+onDrop={(e: DragEvent<HTMLDivElement>) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files?.[0]; if (f && !busy) void run(f); }}>
+<div className="flex items-center gap-2">
+<span title={live ? 'Подключено' : 'Демо-режим'} className={cn('w-1.5 h-1.5 rounded-full shrink-0', live ? 'bg-emerald-400/90' : 'bg-zinc-600')} />
+<span title={currentFilename ?? 'Файл не загружен'} className="text-[12px] font-mono text-zinc-500 max-w-[160px] truncate hidden md:inline">{currentFilename ?? 'demo'}</span>
+<button type="button" onClick={() => ref.current?.click()} disabled={busy} title="Загрузить .pcap (можно перетащить)" className="btn-secondary !h-8">
+<UploadIcon size={13} />{busy ? 'Загрузка...' : 'Загрузить PCAP'}</button>
+<input ref={ref} type="file" accept={UPLOAD_INPUT_ACCEPT} onChange={(e: ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void run(f); }} className="hidden" />
+</div>
+{err && <div title={err} className="absolute top-full mt-1.5 right-0 max-w-[280px] truncate text-[11px] text-red-200/90 bg-red-400/10 border border-red-400/20 rounded-md px-2 py-1 z-20">{err}</div>}
+{drag && <div className="absolute -inset-2 rounded-lg border border-dashed border-white/30 bg-white/[0.04] pointer-events-none z-10" />}
+</div>
+);
 };

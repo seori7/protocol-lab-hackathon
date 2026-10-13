@@ -12,6 +12,7 @@ import { CoverageBar } from './CoverageBar';
 import { EntropyStrip } from './EntropyStrip';
 import { HexMinimap } from './HexMinimap';
 import { ShortcutsModal } from './ShortcutsModal';
+import { ChevronUpIcon, ChevronDownIcon, XIcon, HelpIcon, AlertIcon } from './icons';
 
 const BYTES_PER_LINE = 16;
 const BYTES_PER_HALF_LINE = 8;
@@ -51,25 +52,23 @@ const KEY_ARROW_DOWN = 'ArrowDown';
 const KEY_HOME = 'Home';
 const KEY_END = 'End';
 const KEY_ENTER = 'Enter';
-const KEY_SELECT_ALL_LOWER = 'a';
-const KEY_COPY_LOWER = 'c';
 const INPUT_TAG_NAME = 'INPUT';
 
-const BYTE_CELL_BASE = 'inline-flex items-center justify-center w-7 h-6 rounded text-[13px] cursor-crosshair transition-colors duration-75';
-const BYTE_CELL_SELECTED = 'bg-blue-600 text-white shadow-[0_0_0_1px_rgba(59,130,246,0.6)]';
-const BYTE_CELL_IDLE = 'text-slate-200 hover:bg-slate-700/70 hover:text-white';
-const ASCII_CELL_BASE = 'inline-flex items-center justify-center w-[14px] h-6 text-[13px] rounded-sm cursor-crosshair transition-colors duration-75';
-const ASCII_CELL_SELECTED = 'bg-blue-600 text-white';
-const ASCII_CELL_IDLE = 'text-slate-400 hover:bg-slate-700/70 hover:text-white';
-const HOVERED_RULE_RING = 'ring-1 ring-white/50';
-const SELECTED_RULE_RING = 'ring-2 ring-white/80';
-const SEARCH_HIT_RING = 'ring-1 ring-yellow-400/80';
-const ACTIVE_SEARCH_CLASSES = 'bg-amber-500 text-slate-950';
+const BYTE_CELL_BASE = 'inline-flex items-center justify-center w-8 h-[28px] rounded-[6px] text-[14px] font-medium cursor-crosshair transition-all duration-150 select-none active:scale-95';
+const BYTE_CELL_SELECTED = 'bg-[#ececee] text-[#131316] font-semibold shadow-[0_2px_14px_rgba(255,255,255,0.14)]';
+const BYTE_CELL_IDLE = 'text-[#c9ccd1] hover:bg-[#26282e] hover:text-white hover:shadow-[0_0_0_1px_rgba(255,255,255,0.1)]';
+const ASCII_CELL_BASE = 'inline-flex items-center justify-center w-[16px] h-[28px] text-[14px] rounded-[4px] cursor-crosshair transition-all duration-150 select-none';
+const ASCII_CELL_SELECTED = 'bg-[#ececee] text-[#131316] font-semibold';
+const ASCII_CELL_IDLE = 'text-zinc-500 hover:bg-[#26282e] hover:text-white';
+const HOVERED_RULE_RING = 'ring-1 ring-white/40';
+const SELECTED_RULE_RING = 'ring-1 ring-white/70';
+const SEARCH_HIT_RING = 'ring-1 ring-[#c9b98a]/60';
+const ACTIVE_SEARCH_CLASSES = 'bg-[#e9dfc3] text-[#1a1a1a] font-semibold';
 
 function hexToAsciiChar(hexByte: string): string {
   const code = parseInt(hexByte, HEX_RADIX);
-  const isPrintable = code >= ASCII_PRINTABLE_MIN && code <= ASCII_PRINTABLE_MAX;
-  return isPrintable ? String.fromCharCode(code) : PLACEHOLDER_ASCII_CHAR;
+  const ok = code >= ASCII_PRINTABLE_MIN && code <= ASCII_PRINTABLE_MAX;
+  return ok ? String.fromCharCode(code) : PLACEHOLDER_ASCII_CHAR;
 }
 
 function formatLineOffset(offset: number): string {
@@ -104,9 +103,9 @@ function HexLineRowInner({
     return offset >= activeSearchStart && offset < activeSearchStart + activeSearchLength;
   };
   return (
-    <div className="flex items-center px-2 py-[1px] rounded hover:bg-slate-800/50">
-      <div className="w-14 shrink-0 text-slate-500 select-none mr-4">{line.offsetLabel}</div>
-      <div className="flex gap-[2px] shrink-0">
+    <div className="flex items-center px-2 py-[2px] rounded-md hover:bg-white/[0.03] transition-colors">
+      <div className="w-14 shrink-0 text-zinc-600 font-mono text-[12px] select-none mr-4">{line.offsetLabel}</div>
+      <div className="flex gap-[3px] shrink-0">
         {line.bytes.map((byte, idxInLine) => {
           const selected = isSelected(byte.offset);
           const rule = byteToRuleMap.get(byte.offset) ?? null;
@@ -127,11 +126,11 @@ function HexLineRowInner({
               isSelRule && SELECTED_RULE_RING,
               isHit && SEARCH_HIT_RING
             );
-          } else if (isHit) stateClass = cn(BYTE_CELL_IDLE, SEARCH_HIT_RING, 'text-yellow-200');
+          } else if (isHit) stateClass = cn(BYTE_CELL_IDLE, SEARCH_HIT_RING, 'text-[#e9dfc3]');
           else stateClass = BYTE_CELL_IDLE;
           const title = rule
-            ? `Offset ${formatHexAddress(byte.offset)} (${byte.offset}) | ${rule.name} [${rule.data_type}] [${rule.anchor}]`
-            : `Offset ${formatHexAddress(byte.offset)} (${byte.offset})`;
+            ? `${formatHexAddress(byte.offset)} (${byte.offset}) | ${rule.name} [${rule.data_type}]`
+            : `${formatHexAddress(byte.offset)} (${byte.offset})`;
           return (
             <span
               key={byte.offset}
@@ -139,17 +138,17 @@ function HexLineRowInner({
               onMouseDown={(e) => onByteMouseDown(byte.offset, e)}
               onMouseEnter={() => onByteMouseEnter(byte.offset)}
               title={title}
-              className={cn(BYTE_CELL_BASE, stateClass, needsGap && 'ml-3')}
+              className={cn(BYTE_CELL_BASE, stateClass, needsGap && 'ml-4')}
             >
               {byte.hex}
             </span>
           );
         })}
         {Array.from({ length: BYTES_PER_LINE - line.bytes.length }).map((_, i) => (
-          <span key={`empty-${i}`} className="inline-block w-7 h-6" />
+          <span key={`empty-${i}`} className="inline-block w-8 h-[28px]" />
         ))}
       </div>
-      <div className="ml-4 pl-4 border-l border-slate-800 flex shrink-0">
+      <div className="ml-4 pl-4 border-l border-white/[0.07] flex shrink-0">
         {line.bytes.map((byte) => {
           const selected = isSelected(byte.offset);
           const rule = byteToRuleMap.get(byte.offset) ?? null;
@@ -171,7 +170,7 @@ function HexLineRowInner({
               key={`ascii-${byte.offset}`}
               onMouseDown={(e) => onByteMouseDown(byte.offset, e)}
               onMouseEnter={() => onByteMouseEnter(byte.offset)}
-              title={rule ? `${rule.name} [${rule.data_type}] [${rule.anchor}]` : `Offset ${formatHexAddress(byte.offset)}`}
+              title={rule ? `${rule.name} [${rule.data_type}]` : formatHexAddress(byte.offset)}
               className={cn(ASCII_CELL_BASE, stateClass)}
             >
               {byte.ascii}
@@ -382,9 +381,9 @@ export const HexViewer: FC<HexViewerProps> = ({
     void (async () => {
       try {
         await navigator.clipboard.writeText(text);
-        showCopyFeedback('HEX скопирован');
+        showCopyFeedback('Скопировано HEX');
       } catch {
-        showCopyFeedback('Не удалось скопировать');
+        showCopyFeedback('Не удалось');
       }
     })();
   }, [bytes, selectionRange, showCopyFeedback]);
@@ -396,9 +395,9 @@ export const HexViewer: FC<HexViewerProps> = ({
     void (async () => {
       try {
         await navigator.clipboard.writeText(text);
-        showCopyFeedback('ASCII скопирован');
+        showCopyFeedback('Скопировано ASCII');
       } catch {
-        showCopyFeedback('Не удалось скопировать');
+        showCopyFeedback('Не удалось');
       }
     })();
   }, [bytes, selectionRange, showCopyFeedback]);
@@ -409,13 +408,13 @@ export const HexViewer: FC<HexViewerProps> = ({
     if (bytes.length === 0) return;
     const isCtrl = event.ctrlKey || event.metaKey;
     const lowerKey = event.key.toLowerCase();
-    if (isCtrl && lowerKey === KEY_SELECT_ALL_LOWER) {
+    if (isCtrl && lowerKey === 'a') {
       event.preventDefault();
       setSelectionStart(FIRST_BYTE_OFFSET);
       setSelectionEnd(bytes.length - CURSOR_MOVE_STEP);
       return;
     }
-    if (isCtrl && lowerKey === KEY_COPY_LOWER && selectionRange) {
+    if (isCtrl && lowerKey === 'c' && selectionRange) {
       event.preventDefault();
       handleCopyHex();
       return;
@@ -498,7 +497,7 @@ export const HexViewer: FC<HexViewerProps> = ({
 
   if (bytes.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-slate-500 bg-slate-900">
+      <div className="flex items-center justify-center h-full text-zinc-500 bg-[#0e0f11] text-[13px] font-sans">
         Нет данных для отображения
       </div>
     );
@@ -510,9 +509,9 @@ export const HexViewer: FC<HexViewerProps> = ({
   const isSearchValid = searchBytes !== null;
 
   return (
-    <div className="flex flex-col h-full bg-slate-900 text-slate-200">
-      <div className="px-4 py-2 bg-slate-900 border-b border-slate-800 flex items-center gap-3 shrink-0 flex-wrap">
-        <div className="font-semibold text-slate-100 text-sm tracking-wide whitespace-nowrap">Hex Viewer</div>
+    <div className="flex flex-col h-full min-h-0 bg-[#0e0f11] text-zinc-200 font-sans">
+      <div className="px-4 py-2.5 bg-[#15161a] border-b border-white/[0.07] flex items-center gap-3 shrink-0 flex-wrap">
+        <div className="text-[13px] font-semibold tracking-wide text-zinc-100 whitespace-nowrap">Hex Viewer</div>
         <div className="flex items-center gap-1.5 ml-auto">
           <input
             value={searchQuery}
@@ -520,10 +519,10 @@ export const HexViewer: FC<HexViewerProps> = ({
             onKeyDown={(e) => { if (e.key === KEY_ENTER) handleSearchNext(); }}
             placeholder="Поиск HEX: 01 02 FF"
             maxLength={SEARCH_INPUT_MAX_LENGTH}
-            className="w-44 px-2 py-1 text-xs font-mono rounded bg-slate-800 border border-slate-700 text-slate-100 placeholder:text-slate-600 outline-none focus:border-yellow-500"
+            className="field w-48 font-mono text-[12px]"
           />
           {normalizedSearch.length > 0 && (
-            <span className={`text-[11px] font-mono ${isSearchValid ? 'text-yellow-300' : 'text-rose-400'}`}>
+            <span className={cn('text-[11px] font-mono', isSearchValid ? 'text-zinc-300' : 'text-red-300')}>
               {isSearchValid
                 ? searchOffsets.length > 0
                   ? `${(activeSearchIndex % searchOffsets.length) + 1}/${searchOffsets.length}`
@@ -532,19 +531,19 @@ export const HexViewer: FC<HexViewerProps> = ({
             </span>
           )}
           <button type="button" onClick={handleSearchPrev} disabled={searchOffsets.length === 0} title="Предыдущее"
-            className="px-1.5 py-1 text-xs rounded bg-slate-800 border border-slate-700 disabled:opacity-40 hover:border-slate-500 cursor-pointer">↑</button>
-          <button type="button" onClick={handleSearchNext} disabled={searchOffsets.length === 0} title="Следующее (Enter)"
-            className="px-1.5 py-1 text-xs rounded bg-slate-800 border border-slate-700 disabled:opacity-40 hover:border-slate-500 cursor-pointer">↓</button>
+            className="btn-secondary h-8 w-8 p-0 disabled:opacity-40"><ChevronUpIcon size={14} /></button>
+          <button type="button" onClick={handleSearchNext} disabled={searchOffsets.length === 0} title="Следующее"
+            className="btn-secondary h-8 w-8 p-0 disabled:opacity-40"><ChevronDownIcon size={14} /></button>
           {searchQuery && (
             <button type="button" onClick={() => setSearchQuery('')} title="Очистить"
-              className="px-1.5 py-1 text-xs rounded text-slate-500 hover:text-white cursor-pointer">✕</button>
+              className="btn-ghost"><XIcon size={13} /></button>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <div className="text-xs text-slate-500 font-mono whitespace-nowrap">
-            {bytes.length} bytes • {rules.length} rules
+          <div className="text-[12px] text-zinc-500 font-mono whitespace-nowrap">
+            {bytes.length} bytes · {rules.length} rules
           </div>
-          <button type="button" onClick={() => setIsShortcutsOpen(true)} title="Горячие клавиши" className="w-6 h-6 text-xs rounded bg-slate-800 border border-slate-700 hover:border-blue-500 text-slate-400 hover:text-white cursor-pointer">?</button>
+          <button type="button" onClick={() => setIsShortcutsOpen(true)} title="Горячие клавиши" className="btn-secondary h-7 w-7 p-0"><HelpIcon size={14} /></button>
         </div>
       </div>
 
@@ -566,13 +565,12 @@ export const HexViewer: FC<HexViewerProps> = ({
         )}
       </div>
 
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 mt-2">
         <div
           ref={containerRef}
           tabIndex={0}
           onKeyDown={handleKeyDown}
-          title="Кликните сюда и используйте стрелки / Shift+стрелки / Ctrl+A / Ctrl+C"
-          className="flex-1 min-w-0 p-4 overflow-y-auto font-mono text-sm select-none outline-none focus:ring-1 focus:ring-inset focus:ring-blue-500/20"
+          className="flex-1 min-w-0 p-4 overflow-y-auto font-mono select-none outline-none focus:ring-1 focus:ring-inset focus:ring-white/10"
         >
           {visibleLines.map((line) => (
             <HexLineRow
@@ -590,20 +588,18 @@ export const HexViewer: FC<HexViewerProps> = ({
             />
           ))}
           {hiddenLinesCount > 0 && (
-            <div className="flex items-center gap-2 mt-3 px-2">
-              <button type="button" onClick={handleShowMore}
-                className="px-3 py-1.5 text-xs rounded bg-slate-800 border border-slate-700 hover:border-blue-500 cursor-pointer">
-                Показать ещё {Math.min(LINES_LOAD_MORE_STEP, hiddenLinesCount)} из {hiddenLinesCount} строк
+            <div className="flex items-center gap-2 mt-3 px-2 font-sans">
+              <button type="button" onClick={handleShowMore} className="btn-secondary">
+                Показать ещё {Math.min(LINES_LOAD_MORE_STEP, hiddenLinesCount)} из {hiddenLinesCount}
               </button>
-              <button type="button" onClick={handleShowAll}
-                className="px-3 py-1.5 text-xs rounded text-slate-500 hover:text-white cursor-pointer">
+              <button type="button" onClick={handleShowAll} className="btn-ghost">
                 Показать все ({lines.length})
               </button>
             </div>
           )}
         </div>
-        <div className="w-14 shrink-0 border-l border-slate-800 bg-slate-950/50 p-2 flex flex-col min-h-0">
-          <div className="text-[10px] text-slate-600 text-center mb-1 shrink-0">карта</div>
+        <div className="w-14 shrink-0 border-l border-white/[0.07] bg-[#121316] p-2 flex flex-col min-h-0">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600 text-center mb-1.5 shrink-0">Карта</div>
           <div className="flex-1 min-h-0">
             <HexMinimap
               stats={coverageStats}
@@ -617,32 +613,29 @@ export const HexViewer: FC<HexViewerProps> = ({
         </div>
       </div>
 
-      <div className="px-4 py-2.5 bg-slate-950 border-t border-slate-800 font-mono text-xs shrink-0">
+      <div className="px-4 py-2.5 bg-[#15161a] border-t border-white/[0.07] font-mono text-[12px] shrink-0">
         {selectionRange ? (
           <div className="flex items-center gap-3 flex-wrap">
-            <span className="text-slate-400">
-              <span className="text-blue-400 font-semibold">
-                {formatHexAddress(selectionRange.start)} – {formatHexAddress(selectionRange.end)}
-              </span>
-              <span className="text-slate-600"> • </span>
-              <span className="text-emerald-400 font-semibold">{selectionLength} bytes</span>
+            <span className="text-zinc-300 font-medium">
+              {formatHexAddress(selectionRange.start)} – {formatHexAddress(selectionRange.end)}
+              <span className="text-zinc-600"> · </span>
+              <span className="text-zinc-100 font-semibold">{selectionLength} bytes</span>
             </span>
             {overlappingRules.length > 0 && (
-              <span className="text-amber-300">⚠ {overlappingRules.map((r) => r.name).join(', ')}</span>
+              <span className="inline-flex items-center gap-1 text-amber-200/90">
+                <AlertIcon size={12} />{overlappingRules.map((r) => r.name).join(', ')}
+              </span>
             )}
-            <span className="text-slate-600 hidden lg:inline">|</span>
-            <span className="text-slate-500 truncate hidden lg:inline max-w-[300px]">{selectionPreview}</span>
-            <span className="ml-auto flex items-center gap-1.5">
-              <button type="button" onClick={handleCopyHex} title="Копировать HEX (Ctrl+C)"
-                className="px-2 py-1 rounded bg-slate-800 border border-slate-700 hover:border-blue-500 text-slate-300 cursor-pointer">HEX</button>
-              <button type="button" onClick={handleCopyAscii} title="Копировать ASCII"
-                className="px-2 py-1 rounded bg-slate-800 border border-slate-700 hover:border-blue-500 text-slate-300 cursor-pointer">ASCII</button>
-              {copyFeedback && <span className="text-emerald-300">{copyFeedback}</span>}
+            <span className="text-zinc-600 truncate hidden lg:inline max-w-[300px]">{selectionPreview}</span>
+            <span className="ml-auto flex items-center gap-1.5 font-sans">
+              <button type="button" onClick={handleCopyHex} title="Копировать HEX" className="btn-secondary h-7 text-[12px]">HEX</button>
+              <button type="button" onClick={handleCopyAscii} title="Копировать ASCII" className="btn-secondary h-7 text-[12px]">ASCII</button>
+              {copyFeedback && <span className="text-emerald-200/90 text-[12px] font-mono">{copyFeedback}</span>}
             </span>
           </div>
         ) : (
-          <div className="text-slate-600">
-            Карта + энтропия сверху — клик выделяет • Стрелки — курсор • Ctrl+A — всё
+          <div className="text-zinc-600 font-sans text-[12px]">
+            Карта и энтропия сверху — клик выделяет · Стрелки — курсор · Ctrl+A — всё
           </div>
         )}
       </div>

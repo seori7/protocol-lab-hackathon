@@ -1,17 +1,16 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { PacketList } from './components/PacketList';
 import { HexViewer } from './components/HexViewer';
-import { RulePanel } from './components/RulePanel';
 import { ProjectUploader } from './components/ProjectUploader';
 import { StreamViewer } from './components/StreamViewer';
 import { DiffViewer } from './components/DiffViewer';
 import { FlowViewer } from './components/FlowViewer';
-import { SuggestionList } from './components/SuggestionList';
-import { LengthPanel } from './components/LengthPanel';
 import { ProjectIO } from './components/ProjectIO';
 import { PacketFilterBar } from './components/PacketFilterBar';
 import { PacketNotesEditor } from './components/PacketNotesEditor';
 import { ReportButton } from './components/ReportButton';
+import { RightSidebar } from './components/RightSidebar';
+import { DatabaseIcon, XIcon } from './components/icons';
 import type {
   Packet, Session, ByteRange, Rule, NewRuleDraft, RuleSuggestion, LengthCandidate,
   RuleUpdatePatch, ApplyRulesState, BackendStatus, CenterViewMode,
@@ -81,24 +80,19 @@ const MOCK_PACKETS_MAP: Record<string, Packet[]> = {
   ],
 };
 
-function formatSessionLabel(session: Session): string {
-  return `${session.endpoints.join(SESSION_ENDPOINTS_SEPARATOR)} (${session.packet_count})`;
+function formatSessionLabel(s: Session): string {
+  return `${s.endpoints.join(SESSION_ENDPOINTS_SEPARATOR)} (${s.packet_count})`;
 }
 
-function convertBackendRulesToFrontend(backendRules: BackendRuleDef[]): Rule[] {
-  const paletteSize = RULE_COLOR_PALETTE.length;
+function convertBackendRulesToFrontend(br: BackendRuleDef[]): Rule[] {
+  const ps = RULE_COLOR_PALETTE.length;
   const now = Date.now();
-  return backendRules.map((b, i) => {
-    const draft = backendRuleToDraft(b);
+  return br.map((b, i) => {
+    const d = backendRuleToDraft(b);
     return {
-      id: b.id,
-      name: draft.name,
-      offset: draft.offset,
-      length: draft.length,
-      data_type: draft.data_type,
-      anchor: draft.anchor,
-      colorIndex: paletteSize > 0 ? i % paletteSize : 0,
-      createdAt: now + i,
+      id: b.id, name: d.name, offset: d.offset, length: d.length,
+      data_type: d.data_type, anchor: d.anchor,
+      colorIndex: ps > 0 ? i % ps : 0, createdAt: now + i,
     };
   });
 }
@@ -133,37 +127,29 @@ function App() {
   const isBackendLive = backendStatus === 'live' && projectId !== MOCK_PROJECT_ID;
 
   const loadRulesWithBackendMerge = useCallback(async (pid: string): Promise<Rule[]> => {
-    const localRules = loadRulesForProject(pid);
-    if (pid === MOCK_PROJECT_ID) {
-      return localRules;
-    }
+    const local = loadRulesForProject(pid);
+    if (pid === MOCK_PROJECT_ID) return local;
     try {
-      const state = await loadProjectState(pid);
-      if (state.rules.length === 0) {
-        return localRules;
-      }
-      const converted = convertBackendRulesToFrontend(state.rules);
-      const backendIds = new Set(converted.map((r) => r.id));
-      const localEndOnly = localRules.filter((r) => r.anchor === "end" && !backendIds.has(r.id));
-      // Перекрашиваем end-хвост чтобы цвета не дублировались
-      const paletteSize = RULE_COLOR_PALETTE.length;
-      const recoloredEnd = localEndOnly.map((r, i) => ({
-        ...r,
-        colorIndex: paletteSize > 0 ? (converted.length + i) % paletteSize : 0,
-      }));
-      return [...converted, ...recoloredEnd];
+      const st = await loadProjectState(pid);
+      if (st.rules.length === 0) return local;
+      const conv = convertBackendRulesToFrontend(st.rules);
+      const ids = new Set(conv.map((r) => r.id));
+      const endOnly = local.filter((r) => r.anchor === 'end' && !ids.has(r.id));
+      const ps = RULE_COLOR_PALETTE.length;
+      const rec = endOnly.map((r, i) => ({ ...r, colorIndex: ps > 0 ? (conv.length + i) % ps : 0 }));
+      return [...conv, ...rec];
     } catch {
-      return localRules;
+      return local;
     }
   }, []);
 
   const initDemoMode = useCallback((): void => {
-    const firstSession = MOCK_SESSIONS[FIRST_SESSION_INDEX]!;
+    const f = MOCK_SESSIONS[FIRST_SESSION_INDEX]!;
     setProjectId(MOCK_PROJECT_ID);
     setProjectFilename(MOCK_PROJECT_FILENAME);
     setSessions(MOCK_SESSIONS);
-    setSelectedSessionId(firstSession.id);
-    setPackets(MOCK_PACKETS_MAP[firstSession.id] ?? []);
+    setSelectedSessionId(f.id);
+    setPackets(MOCK_PACKETS_MAP[f.id] ?? []);
     setSelectedPacket(null);
     setSelectedByteRange(null);
     setSelectedRuleId(null);
@@ -185,18 +171,17 @@ function App() {
     void (async () => {
       setIsLoadingSessions(true);
       try {
-        const liveSessions = await fetchSessions(last.projectId);
-        if (liveSessions.length === 0) throw new Error('empty');
-        const firstId = liveSessions[FIRST_SESSION_INDEX]!.id;
+        const ls = await fetchSessions(last.projectId);
+        if (ls.length === 0) throw new Error('empty');
+        const fid = ls[FIRST_SESSION_INDEX]!.id;
         setProjectId(last.projectId);
         setProjectFilename(last.filename);
-        setSessions(liveSessions);
-        setSelectedSessionId(firstId);
+        setSessions(ls);
+        setSelectedSessionId(fid);
         setRules(await loadRulesWithBackendMerge(last.projectId));
         setBackendStatus('live');
         setIsLoadingPackets(true);
-        const livePackets = await fetchSessionPackets(last.projectId, firstId);
-        setPackets(livePackets);
+        setPackets(await fetchSessionPackets(last.projectId, fid));
         setSelectedPacket(null);
         setSelectedByteRange(null);
         setError(null);
@@ -219,9 +204,7 @@ function App() {
     if (stateSaveTimerRef.current !== null) window.clearTimeout(stateSaveTimerRef.current);
     stateSaveTimerRef.current = window.setTimeout(() => {
       const { backendRules } = toBackendRules(rules);
-      const notesStr = serializeNotes(packetNotes);
-      void saveProjectState(projectId, backendRules, notesStr).catch(() => {
-      });
+      void saveProjectState(projectId, backendRules, serializeNotes(packetNotes)).catch(() => {});
     }, STATE_AUTOSAVE_DELAY_MS);
     return () => {
       if (stateSaveTimerRef.current !== null) window.clearTimeout(stateSaveTimerRef.current);
@@ -235,17 +218,15 @@ function App() {
       return;
     }
     setBookmarkedIds(loadBookmarks(projectId, selectedSessionId));
-    // Заметки: сначала local, если пусто — пробуем бэкенд-state
-    const localNotes = loadPacketNotes(projectId, selectedSessionId);
-    if (Object.keys(localNotes).length > 0 || projectId === MOCK_PROJECT_ID) {
-      setPacketNotes(localNotes);
+    const ln = loadPacketNotes(projectId, selectedSessionId);
+    if (Object.keys(ln).length > 0 || projectId === MOCK_PROJECT_ID) {
+      setPacketNotes(ln);
       return;
     }
     void (async () => {
       try {
-        const state = await loadProjectState(projectId);
-        const parsed = parseNotesString(state.notes);
-        setPacketNotes(parsed ?? {});
+        const st = await loadProjectState(projectId);
+        setPacketNotes(parseNotesString(st.notes) ?? {});
       } catch {
         setPacketNotes({});
       }
@@ -253,13 +234,11 @@ function App() {
   }, [projectId, selectedSessionId]);
 
   useEffect(() => {
-    if (!projectId || !selectedSessionId) return;
-    saveBookmarks(projectId, selectedSessionId, bookmarkedIds);
+    if (projectId && selectedSessionId) saveBookmarks(projectId, selectedSessionId, bookmarkedIds);
   }, [bookmarkedIds, projectId, selectedSessionId]);
 
   useEffect(() => {
-    if (!projectId || !selectedSessionId) return;
-    savePacketNotes(projectId, selectedSessionId, packetNotes);
+    if (projectId && selectedSessionId) savePacketNotes(projectId, selectedSessionId, packetNotes);
   }, [packetNotes, projectId, selectedSessionId]);
 
   useEffect(() => {
@@ -290,14 +269,14 @@ function App() {
     () => findPacketIndex(filteredPackets, selectedPacket?.id ?? null),
     [filteredPackets, selectedPacket]
   );
-  const selectedNote = useMemo(() => {
-    if (!selectedPacket) return '';
-    return packetNotes[selectedPacket.id] ?? '';
-  }, [packetNotes, selectedPacket]);
+  const selectedNote = useMemo(
+    () => (selectedPacket ? (packetNotes[selectedPacket.id] ?? '') : ''),
+    [packetNotes, selectedPacket]
+  );
 
   useEffect(() => {
     if (selectedRule === null && packetFilter.onlyAnomalies) {
-      setPacketFilter((prev) => ({ ...prev, onlyAnomalies: false }));
+      setPacketFilter((p) => ({ ...p, onlyAnomalies: false }));
     }
   }, [selectedRule, packetFilter.onlyAnomalies]);
 
@@ -308,30 +287,23 @@ function App() {
       return;
     }
     const ids = new Set(packets.map((p) => p.id));
-    setDiffPacketAId((prev) => {
-      if (prev !== null && ids.has(prev)) return prev;
-      return packets[FIRST_SESSION_INDEX]!.id;
-    });
-    setDiffPacketBId((prev) => {
-      if (prev !== null && ids.has(prev)) return prev;
-      const second = packets[SECOND_PACKET_INDEX] ?? packets[FIRST_SESSION_INDEX]!;
-      return second.id;
-    });
+    setDiffPacketAId((pr) => (pr !== null && ids.has(pr) ? pr : packets[FIRST_SESSION_INDEX]!.id));
+    setDiffPacketBId((pr) => (pr !== null && ids.has(pr) ? pr : (packets[SECOND_PACKET_INDEX] ?? packets[FIRST_SESSION_INDEX]!).id));
   }, [packets]);
 
-  const selectedSession: Session | null = useMemo(() => {
-    if (!selectedSessionId) return null;
-    return sessions.find((s) => s.id === selectedSessionId) ?? null;
-  }, [sessions, selectedSessionId]);
+  const selectedSession = useMemo(
+    () => (selectedSessionId ? (sessions.find((s) => s.id === selectedSessionId) ?? null) : null),
+    [sessions, selectedSessionId]
+  );
+  const sessionLabel = useMemo(
+    () => (selectedSession ? formatSessionLabel(selectedSession) : null),
+    [selectedSession]
+  );
 
-  const sessionLabel: string | null = useMemo(() => {
-    return selectedSession ? formatSessionLabel(selectedSession) : null;
-  }, [selectedSession]);
-
-  const handleUploadSuccess = useCallback(async (newProjectId: string, filename: string): Promise<void> => {
-    saveLastProject(newProjectId, filename);
-    setProjectId(newProjectId);
-    setProjectFilename(filename);
+  const handleUploadSuccess = useCallback(async (nid: string, fn: string): Promise<void> => {
+    saveLastProject(nid, fn);
+    setProjectId(nid);
+    setProjectFilename(fn);
     setBackendStatus('live');
     setSelectedRuleId(null);
     setCenterViewMode('packet');
@@ -340,20 +312,19 @@ function App() {
     setSelectedByteRange(null);
     setIsLoadingSessions(true);
     try {
-      const liveSessions = await fetchSessions(newProjectId);
-      setSessions(liveSessions);
-      const firstId = liveSessions[FIRST_SESSION_INDEX]?.id ?? null;
-      setSelectedSessionId(firstId);
-      setRules(await loadRulesWithBackendMerge(newProjectId));
-      if (firstId) {
+      const ls = await fetchSessions(nid);
+      setSessions(ls);
+      const fid = ls[FIRST_SESSION_INDEX]?.id ?? null;
+      setSelectedSessionId(fid);
+      setRules(await loadRulesWithBackendMerge(nid));
+      if (fid) {
         setIsLoadingPackets(true);
-        setPackets(await fetchSessionPackets(newProjectId, firstId));
+        setPackets(await fetchSessionPackets(nid, fid));
       } else {
         setPackets([]);
       }
     } catch (err: unknown) {
-      const message = err instanceof ApiError ? err.message : 'Ошибка загрузки сессий';
-      setError(message);
+      setError(err instanceof ApiError ? err.message : 'Ошибка загрузки сессий');
       setSessions([]);
       setPackets([]);
     } finally {
@@ -362,341 +333,298 @@ function App() {
     }
   }, [loadRulesWithBackendMerge]);
 
-  const handleSessionChange = useCallback(async (sessionId: string): Promise<void> => {
-    setSelectedSessionId(sessionId);
+  const handleSessionChange = useCallback(async (sid: string): Promise<void> => {
+    setSelectedSessionId(sid);
     setSelectedPacket(null);
     setSelectedByteRange(null);
     setHoveredRuleId(null);
     setCenterViewMode('packet');
     if (!projectId) return;
     if (projectId === MOCK_PROJECT_ID) {
-      setPackets(MOCK_PACKETS_MAP[sessionId] ?? []);
+      setPackets(MOCK_PACKETS_MAP[sid] ?? []);
       return;
     }
     setIsLoadingPackets(true);
     try {
-      setPackets(await fetchSessionPackets(projectId, sessionId));
+      setPackets(await fetchSessionPackets(projectId, sid));
       setError(null);
     } catch (err: unknown) {
-      const message = err instanceof ApiError ? err.message : 'Ошибка загрузки пакетов';
-      setError(message);
+      setError(err instanceof ApiError ? err.message : 'Ошибка загрузки пакетов');
       setPackets([]);
     } finally {
       setIsLoadingPackets(false);
     }
   }, [projectId]);
 
-  const handleSelectPacket = useCallback((packet: Packet) => {
-    setSelectedPacket(packet);
+  const handleSelectPacket = useCallback((p: Packet) => {
+    setSelectedPacket(p);
     setSelectedByteRange(null);
   }, []);
 
-  const handleStreamSelectPacket = useCallback((packet: Packet) => {
-    setSelectedPacket(packet);
+  const handleStreamSelectPacket = useCallback((p: Packet) => {
+    setSelectedPacket(p);
     setSelectedByteRange(null);
     setCenterViewMode('packet');
   }, []);
 
-  const handleToggleBookmark = useCallback((packetId: number): void => {
-    setBookmarkedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(packetId)) next.delete(packetId);
-      else next.add(packetId);
-      return next;
+  const handleToggleBookmark = useCallback((id: number): void => {
+    setBookmarkedIds((pr) => {
+      const n = new Set(pr);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
     });
   }, []);
 
-  const handleNoteChange = useCallback((packetId: number, note: string): void => {
-    const trimmed = note.slice(0, NOTE_MAX_LENGTH);
-    setPacketNotes((prev) => {
-      if (trimmed.trim().length === 0) {
-        const next = { ...prev };
-        delete next[packetId];
-        return next;
+  const handleNoteChange = useCallback((id: number, note: string): void => {
+    const t = note.slice(0, NOTE_MAX_LENGTH);
+    setPacketNotes((pr) => {
+      if (t.trim().length === 0) {
+        const n = { ...pr };
+        delete n[id];
+        return n;
       }
-      return { ...prev, [packetId]: trimmed };
+      return { ...pr, [id]: t };
     });
   }, []);
 
-  const handleNoteClear = useCallback((packetId: number): void => {
-    setPacketNotes((prev) => {
-      const next = { ...prev };
-      delete next[packetId];
-      return next;
+  const handleNoteClear = useCallback((id: number): void => {
+    setPacketNotes((pr) => {
+      const n = { ...pr };
+      delete n[id];
+      return n;
     });
   }, []);
 
   const handlePrevPacket = useCallback((): void => {
-    if (filteredPackets.length === 0) return;
-    const idx = findPacketIndex(filteredPackets, selectedPacket?.id ?? null);
-    if (idx === -1) {
-      handleSelectPacket(filteredPackets[filteredPackets.length - 1]!);
-      return;
-    }
-    if (idx > 0) handleSelectPacket(filteredPackets[idx - 1]!);
+    if (!filteredPackets.length) return;
+    const i = findPacketIndex(filteredPackets, selectedPacket?.id ?? null);
+    if (i === -1) handleSelectPacket(filteredPackets[filteredPackets.length - 1]!);
+    else if (i > 0) handleSelectPacket(filteredPackets[i - 1]!);
   }, [filteredPackets, selectedPacket, handleSelectPacket]);
 
   const handleNextPacket = useCallback((): void => {
-    if (filteredPackets.length === 0) return;
-    const idx = findPacketIndex(filteredPackets, selectedPacket?.id ?? null);
-    if (idx === -1) {
-      handleSelectPacket(filteredPackets[FIRST_SESSION_INDEX]!);
-      return;
-    }
-    if (idx < filteredPackets.length - 1) handleSelectPacket(filteredPackets[idx + 1]!);
+    if (!filteredPackets.length) return;
+    const i = findPacketIndex(filteredPackets, selectedPacket?.id ?? null);
+    if (i === -1) handleSelectPacket(filteredPackets[FIRST_SESSION_INDEX]!);
+    else if (i < filteredPackets.length - 1) handleSelectPacket(filteredPackets[i + 1]!);
   }, [filteredPackets, selectedPacket, handleSelectPacket]);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (!event.altKey) return;
-      if (event.key !== PACKET_NAV_PREV_KEY && event.key !== PACKET_NAV_NEXT_KEY) return;
-      const target = event.target as HTMLElement | null;
-      const tag = target?.tagName ?? '';
-      if ((PACKET_NAV_IGNORE_TAGS as readonly string[]).includes(tag)) return;
-      event.preventDefault();
-      if (event.key === PACKET_NAV_PREV_KEY) handlePrevPacket();
+    const h = (e: KeyboardEvent): void => {
+      if (!e.altKey) return;
+      if (e.key !== PACKET_NAV_PREV_KEY && e.key !== PACKET_NAV_NEXT_KEY) return;
+      const t = e.target as HTMLElement | null;
+      if ((PACKET_NAV_IGNORE_TAGS as readonly string[]).includes(t?.tagName ?? '')) return;
+      e.preventDefault();
+      if (e.key === PACKET_NAV_PREV_KEY) handlePrevPacket();
       else handleNextPacket();
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
   }, [handlePrevPacket, handleNextPacket]);
 
-  const handleSelectionChange = useCallback((range: ByteRange | null) => {
-    setSelectedByteRange(range);
-  }, []);
+  const handleSelectionChange = useCallback((r: ByteRange | null) => setSelectedByteRange(r), []);
 
-  const handleFilterChange = useCallback((patch: Partial<PacketFilterState>): void => {
-    setPacketFilter((prev) => ({ ...prev, ...patch }));
+  const handleFilterChange = useCallback((p: Partial<PacketFilterState>): void => {
+    setPacketFilter((pr) => ({ ...pr, ...p }));
   }, []);
 
   const handleFilterReset = useCallback((): void => {
     setPacketFilter({ ...DEFAULT_PACKET_FILTER });
   }, []);
 
-  const handleCreateRule = useCallback((draft: NewRuleDraft) => {
-    const newId = generateRuleId();
+  const handleCreateRule = useCallback((d: NewRuleDraft) => {
+    const nid = generateRuleId();
     const now = Date.now();
-    setRules((prev) => {
-      const paletteSize = RULE_COLOR_PALETTE.length;
-      const colorIndex = paletteSize > 0 ? prev.length % paletteSize : 0;
-      const newRule: Rule = {
-        id: newId, name: draft.name,
-        offset: draft.offset, length: draft.length,
-        data_type: draft.data_type, anchor: draft.anchor, colorIndex, createdAt: now,
-      };
-      return [...prev, newRule];
+    setRules((pr) => {
+      const ps = RULE_COLOR_PALETTE.length;
+      return [...pr, {
+        id: nid, name: d.name, offset: d.offset, length: d.length,
+        data_type: d.data_type, anchor: d.anchor,
+        colorIndex: ps > 0 ? pr.length % ps : 0, createdAt: now,
+      }];
     });
-    setSelectedRuleId(newId);
+    setSelectedRuleId(nid);
     setSelectedByteRange(null);
-    setClearSelectionToken((prev) => prev + 1);
+    setClearSelectionToken((p) => p + 1);
   }, []);
 
-  const handleCreateFromSuggestion = useCallback((suggestion: RuleSuggestion): void => {
+  const handleCreateFromSuggestion = useCallback((s: RuleSuggestion): void => {
     handleCreateRule({
-      name: suggestion.suggestedName,
-      data_type: suggestion.suggestedType,
-      offset: suggestion.offset,
-      length: suggestion.length,
-      anchor: suggestion.anchor,
+      name: s.suggestedName, data_type: s.suggestedType,
+      offset: s.offset, length: s.length, anchor: s.anchor,
     });
   }, [handleCreateRule]);
 
   const handleCreateAllSuggestions = useCallback((): void => {
-    const uncovered = suggestions.filter((s) => {
-      const range: ByteRange = { start: s.offset, end: s.offset + s.length - INCLUSIVE_RANGE_ADJUSTMENT };
-      return getOverlappingRules(rules, range).length === 0;
-    });
-    if (uncovered.length === 0) return;
+    const un = suggestions.filter((s) =>
+      getOverlappingRules(rules, { start: s.offset, end: s.offset + s.length - INCLUSIVE_RANGE_ADJUSTMENT }).length === 0
+    );
+    if (!un.length) return;
     const now = Date.now();
-    setRules((prev) => {
-      const paletteSize = RULE_COLOR_PALETTE.length;
-      const created: Rule[] = uncovered.map((s, i) => ({
-        id: generateRuleId(),
-        name: s.suggestedName,
-        offset: s.offset,
-        length: s.length,
-        data_type: s.suggestedType,
-        anchor: s.anchor,
-        colorIndex: paletteSize > 0 ? (prev.length + i) % paletteSize : 0,
-        createdAt: now + i,
-      }));
-      return [...prev, ...created];
+    setRules((pr) => {
+      const ps = RULE_COLOR_PALETTE.length;
+      return [...pr, ...un.map((s, i) => ({
+        id: generateRuleId(), name: s.suggestedName, offset: s.offset, length: s.length,
+        data_type: s.suggestedType, anchor: s.anchor,
+        colorIndex: ps > 0 ? (pr.length + i) % ps : 0, createdAt: now + i,
+      }))];
     });
     setSelectedByteRange(null);
-    setClearSelectionToken((prev) => prev + 1);
+    setClearSelectionToken((p) => p + 1);
   }, [suggestions, rules]);
 
-  const handleCreateFromLength = useCallback((candidate: LengthCandidate): void => {
+  const handleCreateFromLength = useCallback((c: LengthCandidate): void => {
     handleCreateRule({
-      name: `Length ${candidate.offset}`,
-      data_type: candidate.dataType,
-      offset: candidate.offset,
-      length: candidate.length,
-      anchor: 'start',
+      name: `Length ${c.offset}`, data_type: c.dataType,
+      offset: c.offset, length: c.length, anchor: 'start',
     });
   }, [handleCreateRule]);
 
-  const handleDeleteRule = useCallback((ruleId: string) => {
-    setRules((prev) => prev.filter((r) => r.id !== ruleId));
-    setHoveredRuleId((prev) => (prev === ruleId ? null : prev));
-    setSelectedRuleId((prev) => (prev === ruleId ? null : prev));
+  const handleDeleteRule = useCallback((id: string) => {
+    setRules((pr) => pr.filter((r) => r.id !== id));
+    setHoveredRuleId((p) => (p === id ? null : p));
+    setSelectedRuleId((p) => (p === id ? null : p));
   }, []);
 
-  const handleDuplicateRule = useCallback((ruleId: string): void => {
-    const source = rules.find((r) => r.id === ruleId);
-    if (!source) return;
-    handleCreateRule({
-      name: `${source.name} copy`,
-      data_type: source.data_type,
-      offset: source.offset,
-      length: source.length,
-      anchor: source.anchor,
-    });
+  const handleDuplicateRule = useCallback((id: string): void => {
+    const s = rules.find((r) => r.id === id);
+    if (s) {
+      handleCreateRule({
+        name: `${s.name} copy`, data_type: s.data_type,
+        offset: s.offset, length: s.length, anchor: s.anchor,
+      });
+    }
   }, [rules, handleCreateRule]);
 
-  const handleDeleteGroup = useCallback((groupName: string): void => {
-    setRules((prev) => prev.filter((r) => {
-      const idx = r.name.indexOf(':');
-      if (idx <= 0) return true;
-      return r.name.slice(0, idx).trim() !== groupName;
+  const handleDeleteGroup = useCallback((g: string): void => {
+    setRules((pr) => pr.filter((r) => {
+      const i = r.name.indexOf(':');
+      return i <= 0 || r.name.slice(0, i).trim() !== g;
     }));
     setSelectedRuleId(null);
     setHoveredRuleId(null);
   }, []);
 
-  const handleHoverRule = useCallback((ruleId: string | null) => setHoveredRuleId(ruleId), []);
-  const handleSelectRule = useCallback((ruleId: string | null) => setSelectedRuleId(ruleId), []);
+  const handleHoverRule = useCallback((id: string | null) => setHoveredRuleId(id), []);
+  const handleSelectRule = useCallback((id: string | null) => setSelectedRuleId(id), []);
 
-  const handleUpdateRule = useCallback((ruleId: string, patch: RuleUpdatePatch) => {
-    setRules((prev) => prev.map((r) => (r.id === ruleId ? { ...r, ...patch } : r)));
+  const handleUpdateRule = useCallback((id: string, p: RuleUpdatePatch) => {
+    setRules((pr) => pr.map((r) => (r.id === id ? { ...r, ...p } : r)));
   }, []);
 
-  const handleResizeRule = useCallback((ruleId: string, range: ByteRange) => {
-    const total = selectedPacket ? getPayloadByteLength(selectedPacket.payload_hex) : null;
-    const newLength = range.end - range.start + INCLUSIVE_RANGE_ADJUSTMENT;
-    setRules((prev) => prev.map((r) => {
-      if (r.id !== ruleId) return r;
-      if (r.anchor === 'end' && total !== null) {
-        const newOffset = computeEndOffsetForRange(range.start, newLength, total);
-        return { ...r, offset: newOffset, length: newLength };
+  const handleResizeRule = useCallback((id: string, rg: ByteRange) => {
+    const t = selectedPacket ? getPayloadByteLength(selectedPacket.payload_hex) : null;
+    const nl = rg.end - rg.start + INCLUSIVE_RANGE_ADJUSTMENT;
+    setRules((pr) => pr.map((r) => {
+      if (r.id !== id) return r;
+      if (r.anchor === 'end' && t !== null) {
+        return { ...r, offset: computeEndOffsetForRange(rg.start, nl, t), length: nl };
       }
-      return { ...r, offset: range.start, length: newLength };
+      return { ...r, offset: rg.start, length: nl };
     }));
     setSelectedByteRange(null);
-    setClearSelectionToken((prev) => prev + 1);
+    setClearSelectionToken((p) => p + 1);
   }, [selectedPacket]);
 
   const handleClearSelection = useCallback(() => {
-    setClearSelectionToken((prev) => prev + 1);
+    setClearSelectionToken((p) => p + 1);
     setSelectedByteRange(null);
   }, []);
 
-  const handleRequestSelectRange = useCallback((range: ByteRange): void => {
+  const handleRequestSelectRange = useCallback((rg: ByteRange): void => {
     setCenterViewMode('packet');
-    setPendingSelection(range);
-    setPendingSelectionToken((prev) => prev + 1);
+    setPendingSelection(rg);
+    setPendingSelectionToken((p) => p + 1);
   }, []);
 
   const handleLoadMadrigal = useCallback((
-    drafts: NewRuleDraft[],
-    bookmarks: number[] | null,
-    notes: PacketNotesMap | null
+    drafts: NewRuleDraft[], bm: number[] | null, nt: PacketNotesMap | null
   ): void => {
     setRules(() => {
-      const paletteSize = RULE_COLOR_PALETTE.length;
+      const ps = RULE_COLOR_PALETTE.length;
       const now = Date.now();
       return drafts.map((d, i) => ({
-        id: generateRuleId(),
-        name: d.name,
-        offset: d.offset,
-        length: d.length,
-        data_type: d.data_type,
-        anchor: d.anchor,
-        colorIndex: paletteSize > 0 ? i % paletteSize : 0,
-        createdAt: now + i,
+        id: generateRuleId(), name: d.name, offset: d.offset, length: d.length,
+        data_type: d.data_type, anchor: d.anchor,
+        colorIndex: ps > 0 ? i % ps : 0, createdAt: now + i,
       }));
     });
-    if (bookmarks !== null) setBookmarkedIds(new Set(bookmarks));
-    if (notes !== null) setPacketNotes(notes);
+    if (bm !== null) setBookmarkedIds(new Set(bm));
+    if (nt !== null) setPacketNotes(nt);
     setSelectedRuleId(null);
     setHoveredRuleId(null);
     setSelectedByteRange(null);
-    setClearSelectionToken((prev) => prev + 1);
+    setClearSelectionToken((p) => p + 1);
   }, []);
 
   const handleApplyRules = useCallback(async (): Promise<void> => {
-    if (!projectId || projectId === MOCK_PROJECT_ID || rules.length === 0) return;
+    if (!projectId || projectId === MOCK_PROJECT_ID || !rules.length) return;
     const { backendRules, skippedEndCount, skippedEndNames } = toBackendRules(rules);
-    if (backendRules.length === 0) {
+    if (!backendRules.length) {
       setApplyState({
         status: 'error', matchedPackets: null, totalChecked: null,
-        skippedEndRules: skippedEndCount,
-        message: `Все ${skippedEndCount} правил end-anchored, бэкенд понимает только start`,
+        skippedEndRules: skippedEndCount, message: `Все ${skippedEndCount} правил end-anchored`,
       });
       return;
     }
-    setApplyState({ status: 'loading', matchedPackets: null, totalChecked: null, skippedEndRules: skippedEndCount, message: null });
-    // Путь 1: validate на сервере (предпочтительно, не шлем payloads)
+    setApplyState({
+      status: 'loading', matchedPackets: null, totalChecked: null,
+      skippedEndRules: skippedEndCount, message: null,
+    });
     if (selectedSessionId) {
       try {
-        const report = await validateRulesOnBackend(projectId, selectedSessionId, backendRules, "all");
-        const suffix = skippedEndCount > 0 ? ` (пропущено end: ${skippedEndNames.join(', ')})` : '';
+        const rep = await validateRulesOnBackend(projectId, selectedSessionId, backendRules, 'all');
         setApplyState({
-          status: 'success',
-          matchedPackets: report.successful_packets,
-          totalChecked: report.total_packets_checked,
-          skippedEndRules: skippedEndCount,
-          message: skippedEndCount > 0 ? `OK, но${suffix}` : null,
+          status: 'success', matchedPackets: rep.successful_packets,
+          totalChecked: rep.total_packets_checked, skippedEndRules: skippedEndCount,
+          message: skippedEndCount ? `Пропущено end: ${skippedEndNames.join(', ')}` : null,
         });
         return;
       } catch (err) {
         if (!(err instanceof ApiError)) {
           setApplyState({
             status: 'error', matchedPackets: null, totalChecked: null,
-            skippedEndRules: skippedEndCount, message: 'Ошибка валидации корпуса',
+            skippedEndRules: skippedEndCount, message: 'Ошибка валидации',
           });
           return;
         }
       }
     }
     try {
-      const payloads = packets.slice(0, APPLY_FALLBACK_MAX_PAYLOADS).map((p) => p.payload_hex);
-      const res = await applyRulesOnBackend(backendRules, payloads);
-      let matched = 0;
+      const pls = packets.slice(0, APPLY_FALLBACK_MAX_PAYLOADS).map((p) => p.payload_hex);
+      const res = await applyRulesOnBackend(backendRules, pls);
+      let m = 0;
       for (const pkt of res.results) {
-        const allOk = pkt.matches.length > 0 && pkt.matches.every((m) => m.success);
-        if (allOk) matched += 1;
+        if (pkt.matches.length && pkt.matches.every((x) => x.success)) m++;
       }
       setApplyState({
-        status: 'success', matchedPackets: matched, totalChecked: res.results.length,
+        status: 'success', matchedPackets: m, totalChecked: res.results.length,
         skippedEndRules: skippedEndCount, message: null,
       });
     } catch (err: unknown) {
-      const message = err instanceof ApiError ? err.message : 'Ошибка проверки правил';
       setApplyState({
         status: 'error', matchedPackets: null, totalChecked: null,
-        skippedEndRules: skippedEndCount, message,
+        skippedEndRules: skippedEndCount,
+        message: err instanceof ApiError ? err.message : 'Ошибка проверки',
       });
     }
   }, [projectId, selectedSessionId, rules, packets]);
 
   const handleExportRules = useCallback((): void => {
-    if (rules.length === 0) return;
-    downloadRulesAsJson(rules, buildExportFilename());
+    if (rules.length) downloadRulesAsJson(rules, buildExportFilename());
   }, [rules]);
 
   const handleImportRules = useCallback((drafts: NewRuleDraft[]): void => {
-    setRules((prev) => {
-      const paletteSize = RULE_COLOR_PALETTE.length;
+    setRules((pr) => {
+      const ps = RULE_COLOR_PALETTE.length;
       const now = Date.now();
-      const imported: Rule[] = drafts.map((d, i) => ({
-        id: generateRuleId(), name: d.name,
-        offset: d.offset, length: d.length, data_type: d.data_type,
-        anchor: d.anchor,
-        colorIndex: paletteSize > 0 ? (prev.length + i) % paletteSize : 0,
-        createdAt: now + i,
-      }));
-      return [...prev, ...imported];
+      return [...pr, ...drafts.map((d, i) => ({
+        id: generateRuleId(), name: d.name, offset: d.offset, length: d.length,
+        data_type: d.data_type, anchor: d.anchor,
+        colorIndex: ps > 0 ? (pr.length + i) % ps : 0, createdAt: now + i,
+      }))];
     });
   }, []);
 
@@ -706,13 +634,20 @@ function App() {
     setError(null);
   }, [initDemoMode]);
 
+  const modes: Array<{ id: CenterViewMode; label: string; title: string }> = [
+    { id: 'packet', label: 'Пакет', title: 'Один пакет' },
+    { id: 'streams', label: 'Потоки', title: 'Потоки' },
+    { id: 'diff', label: 'Diff', title: 'Сравнение' },
+    { id: 'flow', label: 'Flow', title: 'Диаграмма' },
+  ];
+
   return (
-    <div className="flex flex-col h-screen bg-slate-950 text-slate-200">
-      <header className="bg-slate-900 border-b border-slate-800 px-4 py-2.5 flex justify-between items-center shrink-0 z-10 gap-3">
+    <div className="flex flex-col h-[100dvh] max-h-[100dvh] overflow-hidden bg-[#0e0f11] text-zinc-200 font-sans">
+      <header className="bg-[#15161a] border-b border-white/[0.07] px-4 py-2.5 flex justify-between items-center shrink-0 z-10 gap-3">
         <div className="flex items-center gap-3 shrink-0">
-          <div className="w-2.5 h-2.5 rounded-full bg-blue-500 shadow-[0_0_12px_rgba(59,130,246,0.8)]" />
-          <h1 className="text-[15px] font-semibold tracking-wide text-slate-100 hidden xl:block">
-            Анализатор протоколов <span className="text-slate-500 font-normal">/ RE</span>
+          <div className="w-7 h-7 rounded-md bg-[#f4f4f5] text-[#18181b] flex items-center justify-center text-[12px] font-bold tracking-tight">PL</div>
+          <h1 className="text-[13px] font-semibold tracking-wide text-zinc-100 hidden xl:block">
+            Protocol Lab <span className="text-zinc-500 font-normal">/ Reverse Engineering</span>
           </h1>
         </div>
         <div className="flex items-center gap-2 min-w-0">
@@ -724,39 +659,43 @@ function App() {
           <select
             value={selectedSessionId ?? ''}
             onChange={(e) => void handleSessionChange(e.target.value)}
-            disabled={isLoadingSessions || sessions.length === 0}
+            disabled={isLoadingSessions || !sessions.length}
             title="TCP-сессия"
-            className="max-w-[240px] px-2.5 py-1.5 text-xs font-mono rounded-md bg-slate-800 border border-slate-700 text-slate-200 outline-none focus:border-blue-500 cursor-pointer disabled:opacity-50">
-            {sessions.length === 0 && <option value="">Нет сессий</option>}
+            className="max-w-[240px] h-8 px-2.5 text-[12px] font-mono rounded-md bg-[#1a1c20] border border-white/[0.07] text-zinc-200 outline-none focus:border-white/25 cursor-pointer disabled:opacity-50 truncate"
+          >
+            {!sessions.length && <option value="">Нет сессий</option>}
             {sessions.map((s) => (
               <option key={s.id} value={s.id}>{formatSessionLabel(s)}</option>
             ))}
           </select>
-          <div className="flex rounded-md overflow-hidden border border-slate-700 shrink-0">
-            <button type="button" onClick={() => setCenterViewMode('packet')} title="Один пакет"
-              className={cn('px-2.5 py-1.5 text-xs font-medium cursor-pointer',
-                centerViewMode === 'packet' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white')}>
-              Пакет
-            </button>
-            <button type="button" onClick={() => setCenterViewMode('streams')} title="Потоки"
-              className={cn('px-2.5 py-1.5 text-xs font-medium cursor-pointer border-l border-slate-700',
-                centerViewMode === 'streams' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white')}>
-              Потоки
-            </button>
-            <button type="button" onClick={() => setCenterViewMode('diff')} title="Сравнение"
-              className={cn('px-2.5 py-1.5 text-xs font-medium cursor-pointer border-l border-slate-700',
-                centerViewMode === 'diff' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white')}>
-              Diff
-            </button>
-            <button type="button" onClick={() => setCenterViewMode('flow')} title="Диаграмма"
-              className={cn('px-2.5 py-1.5 text-xs font-medium cursor-pointer border-l border-slate-700',
-                centerViewMode === 'flow' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white')}>
-              Flow
-            </button>
+          <div className="flex rounded-md overflow-hidden border border-white/[0.08] shrink-0">
+            {modes.map((m, i) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setCenterViewMode(m.id)}
+                title={m.title}
+                className={cn(
+                  'h-8 px-3 text-[12px] font-medium cursor-pointer transition-all',
+                  i > 0 && 'border-l border-white/[0.08]',
+                  centerViewMode === m.id
+                    ? 'bg-[#f4f4f5] text-[#18181b] font-semibold'
+                    : 'bg-[#1a1c20] text-zinc-400 hover:text-white hover:bg-[#22242a)'
+                )}
+              >
+                {m.label}
+              </button>
+            ))}
           </div>
           {isBackendLive && (
-            <button type="button" onClick={handleUseDemo} title="Вернуться к демо"
-              className="text-[11px] text-slate-500 hover:text-slate-300 cursor-pointer shrink-0">demo</button>
+            <button
+              type="button"
+              onClick={handleUseDemo}
+              title="Вернуться к демо"
+              className="text-[11px] text-zinc-500 hover:text-zinc-200 cursor-pointer shrink-0 transition-colors"
+            >
+              demo
+            </button>
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -778,29 +717,32 @@ function App() {
             onLoadProject={handleLoadMadrigal}
           />
           <span className={cn(
-            'text-[11px] font-mono px-2 py-1 rounded border hidden md:inline',
+            'hidden md:inline-flex items-center gap-1.5 text-[11px] font-mono px-2 py-1 rounded border',
             isBackendLive
-              ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20'
-              : 'text-amber-300 bg-amber-500/10 border-amber-500/20'
+              ? 'text-zinc-200 bg-white/[0.06] border-white/10'
+              : 'text-zinc-500 bg-white/[0.03] border-white/[0.07]'
           )}>
-            {isBackendLive ? '● LIVE' : '● MOCK'}
+            <span className={cn('w-1.5 h-1.5 rounded-full', isBackendLive ? 'bg-emerald-400' : 'bg-zinc-600')} />
+            {isBackendLive ? 'LIVE' : 'MOCK'}
           </span>
           {rules.length > 0 && (
-            <span className="text-xs font-mono text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded">
+            <span className="text-[11px] font-mono text-zinc-300 bg-white/[0.05] border border-white/10 px-2.5 py-1 rounded">
               {rules.length} правил
             </span>
           )}
           {error && (
-            <span className="hidden lg:flex items-center gap-2 text-xs bg-amber-500/10 text-amber-300 px-3 py-1 rounded border border-amber-500/20 max-w-[260px]">
+            <span className="hidden lg:flex items-center gap-2 text-[12px] bg-red-400/10 text-red-200/90 px-3 py-1 rounded border border-red-400/20 max-w-[260px]">
               <span className="truncate" title={error}>{error}</span>
-              <button type="button" onClick={() => setError(null)} className="hover:text-white cursor-pointer">✕</button>
+              <button type="button" onClick={() => setError(null)} className="hover:text-white cursor-pointer">
+                <XIcon size={12} />
+              </button>
             </span>
           )}
         </div>
       </header>
 
-      <main className="flex flex-1 overflow-hidden">
-        <div className="w-[360px] min-w-[320px] h-full shrink-0 border-r border-slate-800 flex flex-col">
+      <main className="flex flex-1 min-h-0 overflow-hidden">
+        <div className="w-[360px] min-w-[320px] shrink-0 border-r border-white/[0.07] flex flex-col min-h-0 bg-[#15161a]">
           <PacketFilterBar
             filter={packetFilter}
             totalCount={packets.length}
@@ -837,7 +779,8 @@ function App() {
             onClear={handleNoteClear}
           />
         </div>
-        <div className="flex-1 h-full min-w-0 bg-slate-900">
+
+        <div className="flex-1 min-w-0 min-h-0 bg-[#0e0f11] flex flex-col">
           {centerViewMode === 'streams' ? (
             <StreamViewer
               streams={sessionStreams}
@@ -874,57 +817,44 @@ function App() {
               onHoverRule={handleHoverRule}
             />
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-2">
-              <div className="text-4xl opacity-30">⬡</div>
-              <div className="text-sm">Выберите пакет из списка слева</div>
+            <div className="flex flex-col items-center justify-center h-full text-zinc-600 gap-3">
+              <DatabaseIcon size={28} className="text-zinc-700" />
+              <div className="text-[13px]">Выберите пакет из списка слева</div>
             </div>
           )}
         </div>
-        <div className="w-[360px] min-w-[320px] h-full shrink-0 border-l border-slate-800 flex flex-col">
-          <div className="shrink-0 max-h-[24%] overflow-y-auto border-b border-slate-800 bg-slate-900">
-            <LengthPanel
-              candidates={lengthCandidates}
-              rules={rules}
-              onCreate={handleCreateFromLength}
-              onPreviewRange={handleRequestSelectRange}
-            />
-          </div>
-          <div className="shrink-0 max-h-[28%] overflow-y-auto border-b border-slate-800 bg-slate-900">
-            <SuggestionList
-              suggestions={suggestions}
-              rules={rules}
-              onCreateOne={handleCreateFromSuggestion}
-              onCreateAll={handleCreateAllSuggestions}
-              onPreviewRange={handleRequestSelectRange}
-            />
-          </div>
-          <div className="flex-1 min-h-0">
-            <RulePanel
-              selectedRange={selectedByteRange}
-              payloadHex={selectedPacket?.payload_hex ?? EMPTY_PAYLOAD_HEX}
-              rules={rules}
-              hoveredRuleId={hoveredRuleId}
-              selectedRuleId={selectedRuleId}
-              packets={packets}
-              selectedPacketId={selectedPacket?.id ?? null}
-              onCreateRule={handleCreateRule}
-              onDeleteRule={handleDeleteRule}
-              onDuplicateRule={handleDuplicateRule}
-              onDeleteGroup={handleDeleteGroup}
-              onHoverRule={handleHoverRule}
-              onSelectRule={handleSelectRule}
-              onUpdateRule={handleUpdateRule}
-              onResizeRule={handleResizeRule}
-              onClearSelection={handleClearSelection}
-              onSelectPacket={handleSelectPacket}
-              onRequestSelectRange={handleRequestSelectRange}
-              applyState={applyState}
-              isBackendLive={isBackendLive}
-              onApplyRules={() => void handleApplyRules()}
-              onExportRules={handleExportRules}
-              onImportRules={handleImportRules}
-            />
-          </div>
+
+        <div className="w-[360px] min-w-[320px] shrink-0 border-l border-white/[0.07] flex flex-col min-h-0 bg-[#15161a]">
+          <RightSidebar
+            selectedRange={selectedByteRange}
+            payloadHex={selectedPacket?.payload_hex ?? EMPTY_PAYLOAD_HEX}
+            rules={rules}
+            hoveredRuleId={hoveredRuleId}
+            selectedRuleId={selectedRuleId}
+            packets={packets}
+            selectedPacketId={selectedPacket?.id ?? null}
+            lengthCandidates={lengthCandidates}
+            suggestions={suggestions}
+            onCreateRule={handleCreateRule}
+            onDeleteRule={handleDeleteRule}
+            onDuplicateRule={handleDuplicateRule}
+            onDeleteGroup={handleDeleteGroup}
+            onHoverRule={handleHoverRule}
+            onSelectRule={handleSelectRule}
+            onUpdateRule={handleUpdateRule}
+            onResizeRule={handleResizeRule}
+            onClearSelection={handleClearSelection}
+            onSelectPacket={handleSelectPacket}
+            onRequestSelectRange={handleRequestSelectRange}
+            onCreateFromLength={handleCreateFromLength}
+            onCreateFromSuggestion={handleCreateFromSuggestion}
+            onCreateAllSuggestions={handleCreateAllSuggestions}
+            applyState={applyState}
+            isBackendLive={isBackendLive}
+            onApplyRules={() => void handleApplyRules()}
+            onExportRules={handleExportRules}
+            onImportRules={handleImportRules}
+          />
         </div>
       </main>
     </div>

@@ -2,67 +2,20 @@ import type { FC } from 'react';
 import type { HexMinimapProps } from '../types';
 import { formatHexAddress, getRuleColor } from '../utils/hex';
 import { cn } from '../utils/cn';
-
-const PERCENT_MULTIPLIER = 100;
-
-export const HexMinimap: FC<HexMinimapProps> = ({
-  stats, selectionRange, hoveredRuleId, selectedRuleId, onSelectRange, onHoverRule,
-}) => {
-  const total = stats.totalBytes;
-  if (total === 0) {
-    return <div className="text-[10px] text-slate-600 text-center">—</div>;
-  }
-
-  const selTop = selectionRange ? (selectionRange.start / total) * PERCENT_MULTIPLIER : 0;
-  const selHeight = selectionRange
-    ? ((selectionRange.end - selectionRange.start + 1) / total) * PERCENT_MULTIPLIER
-    : 0;
-
-  return (
-    <div className="relative h-full w-full rounded overflow-hidden bg-slate-800 border border-slate-700 flex flex-col">
-      {stats.segments.map((seg) => {
-        const height = ((seg.end - seg.start + 1) / total) * PERCENT_MULTIPLIER;
-        const len = seg.end - seg.start + 1;
-        if (seg.rule === null) {
-          return (
-            <div
-              key={`m-gap-${seg.start}`}
-              role="button"
-              tabIndex={0}
-              title={`Gap ${formatHexAddress(seg.start)} +${len}`}
-              onClick={() => onSelectRange({ start: seg.start, end: seg.end })}
-              onKeyDown={(e) => { if (e.key === 'Enter') onSelectRange({ start: seg.start, end: seg.end }); }}
-              style={{ height: `${height}%` }}
-              className="w-full min-h-[2px] bg-slate-700/40 hover:bg-slate-600 cursor-pointer border-b border-slate-900/50"
-            />
-          );
-        }
-        const theme = getRuleColor(seg.rule.colorIndex);
-        const isActive = seg.rule.id === hoveredRuleId || seg.rule.id === selectedRuleId;
-        return (
-          <div
-            key={`m-seg-${seg.start}-${seg.rule.id}`}
-            role="button"
-            tabIndex={0}
-            title={`${seg.rule.name} ${formatHexAddress(seg.start)} +${len}`}
-            onClick={() => onSelectRange({ start: seg.start, end: seg.end })}
-            onKeyDown={(e) => { if (e.key === 'Enter') onSelectRange({ start: seg.start, end: seg.end }); }}
-            onMouseEnter={() => onHoverRule(seg.rule?.id ?? null)}
-            onMouseLeave={() => onHoverRule(null)}
-            style={{ height: `${height}%` }}
-            className={cn(
-              'w-full min-h-[2px] cursor-pointer border-b border-slate-900/50',
-              isActive ? theme.byteBackgroundActive : theme.byteBackground
-            )}
-          />
-        );
-      })}
-      {selectionRange && (
-        <div
-          className="absolute left-0 right-0 bg-blue-500/30 border-y border-blue-400/80 pointer-events-none"
-          style={{ top: `${selTop}%`, height: `${selHeight}%` }}
-        />
-      )}
-    </div>
-  );
+const P = 100;
+export const HexMinimap: FC<HexMinimapProps> = ({ stats, selectionRange, hoveredRuleId, selectedRuleId, onSelectRange, onHoverRule }) => {
+const t = stats.totalBytes;
+if (!t) return <div className="text-[10px] text-zinc-600 text-center font-sans">—</div>;
+const top = selectionRange ? (selectionRange.start / t) * P : 0;
+const h = selectionRange ? ((selectionRange.end - selectionRange.start + 1) / t) * P : 0;
+return (
+<div className="relative h-full w-full rounded-md overflow-hidden bg-[#1e2025] border border-white/[0.07] flex flex-col">
+{stats.segments.map((s) => { const hh = ((s.end - s.start + 1) / t) * P; const len = s.end - s.start + 1;
+if (!s.rule) return <div key={`g-${s.start}`} role="button" tabIndex={0} title={`Gap ${formatHexAddress(s.start)} +${len}`} onClick={() => onSelectRange({ start: s.start, end: s.end })} onKeyDown={(e) => { if (e.key === 'Enter') onSelectRange({ start: s.start, end: s.end }); }} style={{ height: `${hh}%` }} className="w-full min-h-[2px] bg-[#2a2d33] hover:bg-[#3a3e45] cursor-pointer border-b border-black/40 transition-colors" />;
+const th = getRuleColor(s.rule.colorIndex); const act = s.rule.id === hoveredRuleId || s.rule.id === selectedRuleId;
+return <div key={`s-${s.start}-${s.rule.id}`} role="button" tabIndex={0} title={`${s.rule.name} ${formatHexAddress(s.start)} +${len}`} onClick={() => onSelectRange({ start: s.start, end: s.end })} onKeyDown={(e) => { if (e.key === 'Enter') onSelectRange({ start: s.start, end: s.end }); }} onMouseEnter={() => onHoverRule(s.rule?.id ?? null)} onMouseLeave={() => onHoverRule(null)} style={{ height: `${hh}%` }}
+className={cn('w-full min-h-[2px] cursor-pointer border-b border-black/40 transition-all', act ? th.byteBackgroundActive : th.byteBackground)} />; })}
+{selectionRange && <div className="absolute left-0 right-0 bg-white/15 border-y border-white/50 pointer-events-none" style={{ top: `${top}%`, height: `${h}%` }} />}
+</div>
+);
 };
