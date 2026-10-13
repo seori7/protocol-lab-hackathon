@@ -13,8 +13,8 @@ import { RightSidebar } from './components/RightSidebar';
 import { DatabaseIcon, XIcon } from './components/icons';
 import type {
   Packet, Session, ByteRange, Rule, NewRuleDraft, RuleSuggestion, LengthCandidate,
-  RuleUpdatePatch, ApplyRulesState, BackendStatus, CenterViewMode,
-  PacketFilterState, PacketNotesMap, BackendRuleDef,
+  RuleUpdatePatch, ApplyRulesState, BackendStatus, CenterViewMode, StreamViewerProps,
+  PacketFilterState, PacketNotesMap, BackendRuleDef, DirectionalStreamsResponse,
 } from './types';
 import { RULE_COLOR_PALETTE } from './constants/rules';
 import { MOCK_PROJECT_ID, MOCK_PROJECT_FILENAME } from './constants/api';
@@ -25,7 +25,7 @@ import {
 import { NOTE_MAX_LENGTH } from './constants/meta';
 import {
   fetchSessions, fetchSessionPackets, applyRulesOnBackend,
-  validateRulesOnBackend, saveProjectState, loadProjectState, ApiError,
+  validateRulesOnBackend, saveProjectState, loadProjectState, ApiError, fetchDirectionalStreams,
 } from './api/client';
 import { generateRuleId } from './utils/hex';
 import {
@@ -36,7 +36,6 @@ import { computeEndOffsetForRange } from './utils/anchor';
 import {
   toBackendRules, backendRuleToDraft, serializeNotes, parseNotesString,
 } from './utils/backendAdapter';
-import { reassembleStreams } from './utils/stream';
 import { buildSessionEntropy } from './utils/entropy';
 import { buildConstantSuggestions } from './utils/suggest';
 import { detectLengthFields } from './utils/length';
@@ -119,6 +118,14 @@ function App() {
   const [packetNotes, setPacketNotes] = useState<PacketNotesMap>({});
   const [isLoadingSessions, setIsLoadingSessions] = useState<boolean>(false);
   const [isLoadingPackets, setIsLoadingPackets] = useState<boolean>(false);
+  type StreamRequestState = {
+  key: string;
+  status: "loading" | "success" | "error";
+  data: DirectionalStreamsResponse | null;
+  error: string | null;
+};
+
+  const [streamRequest, setStreamRequest] = useState<StreamRequestState | null>(null);
   const [applyState, setApplyState] = useState<ApplyRulesState>(INITIAL_APPLY_STATE);
   const [backendStatus, setBackendStatus] = useState<BackendStatus>('mock');
   const [error, setError] = useState<string | null>(null);
@@ -245,7 +252,61 @@ function App() {
     setApplyState(INITIAL_APPLY_STATE);
   }, [rules, projectId, selectedSessionId]);
 
-  const sessionStreams = useMemo(() => reassembleStreams(packets), [packets]);
+const streamKey =
+  projectId && selectedSessionId
+    ? `${projectId}::${selectedSessionId}`
+    : null;
+
+useEffect(() => {
+  if (
+    centerViewMode !== "streams" ||
+    !projectId ||
+    !selectedSessionId ||
+    projectId === MOCK_PROJECT_ID
+  ) {
+    return;
+  }
+
+  const key = `${projectId}::${selectedSessionId}`;
+  const controller = new AbortController();
+  let active = true;
+
+  setStreamRequest({
+    key,
+    status: "loading",
+    data: null,
+    error: null,
+  });
+
+  void fetchDirectionalStreams(projectId, selectedSessionId, controller.signal)
+    .then((data) => {
+      if (!active) return;
+      setStreamRequest({
+        key,
+        status: "success",
+        data,
+        error: null,
+      });
+    })
+    .catch((reason: unknown) => {
+      if (!active) return;
+      setStreamRequest({
+        key,
+        status: "error",
+        data: null,
+        error:
+          reason instanceof Error
+            ? reason.message
+            : "Не удалось загрузить TCP-поток",
+      });
+    });
+
+  return () => {
+    active = false;
+    controller.abort();
+  };
+}, [centerViewMode, projectId, selectedSessionId]);
+
   const sessionEntropy = useMemo(() => buildSessionEntropy(packets), [packets]);
   const suggestions: RuleSuggestion[] = useMemo(
     () => buildConstantSuggestions(sessionEntropy, packets),
@@ -634,6 +695,26 @@ function App() {
     setError(null);
   }, [initDemoMode]);
 
+  const hasCurrentStreamResponse =
+  streamKey !== null && streamRequest?.key === streamKey;
+
+const streamStatus: StreamViewerProps["status"] =
+  projectId === MOCK_PROJECT_ID || streamKey === null
+    ? "idle"
+    : hasCurrentStreamResponse
+      ? streamRequest.status
+      : "loading";
+
+const streamData =
+  hasCurrentStreamResponse && streamRequest.status === "success"
+    ? streamRequest.data
+    : null;
+
+const streamError =
+  hasCurrentStreamResponse && streamRequest.status === "error"
+    ? streamRequest.error
+    : null;
+
   const modes: Array<{ id: CenterViewMode; label: string; title: string }> = [
     { id: 'packet', label: 'Пакет', title: 'Один пакет' },
     { id: 'streams', label: 'Потоки', title: 'Потоки' },
@@ -782,12 +863,14 @@ function App() {
 
         <div className="flex-1 min-w-0 min-h-0 bg-[#0e0f11] flex flex-col">
           {centerViewMode === 'streams' ? (
-            <StreamViewer
-              streams={sessionStreams}
-              packets={packets}
-              selectedPacketId={selectedPacket?.id ?? null}
-              onSelectPacket={handleStreamSelectPacket}
-            />
+          <StreamViewer
+            result={streamData}
+            status={streamStatus}
+            error={streamError}
+            packets={packets}
+            selectedPacketId={selectedPacket?.id ?? null}
+            onSelectPacket={handleStreamSelectPacket}
+          />
           ) : centerViewMode === 'diff' ? (
             <DiffViewer
               packets={packets}

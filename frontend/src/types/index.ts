@@ -8,6 +8,7 @@ export interface Packet {
   seq?: number;
   payload_len?: number;
   anomaly?: string | null;
+  frame_number?: number;
 }
 
 export interface ByteRange { start: number; end: number; }
@@ -133,6 +134,49 @@ export interface DataInspectorRow {
 export type StructExportFormat = "c" | "python" | "markdown";
 export type CenterViewMode = "packet" | "streams" | "diff" | "flow";
 export type StreamDirection = "client_to_server" | "server_to_client";
+
+export interface TcpStreamDataPart {
+  kind: "data";
+  start_offset: number;
+  end_offset: number;
+  payload_hex: string;
+  frame_number: number;
+}
+
+export interface TcpStreamGapPart {
+  kind: "gap";
+  start_offset: number;
+  end_offset: number;
+  length: number;
+}
+
+export type TcpStreamPart = TcpStreamDataPart | TcpStreamGapPart;
+
+export interface TcpStreamConflict {
+  offset: number;
+  first_frame_number: number;
+  other_frame_number: number;
+  first_byte: number;
+  other_byte: number;
+}
+
+export interface DirectionalTcpStream {
+  sequence_base: number | null;
+  span_bytes: number;
+  known_bytes: number;
+  parts: TcpStreamPart[];
+  conflicts: TcpStreamConflict[];
+  overlap_policy: "first_observed";
+}
+
+export interface DirectionalStreamsResponse {
+  project_id: string;
+  session_id: string;
+  role_status: "syn_observed" | "unknown";
+  warning: string | null;
+  streams: Record<StreamDirection, DirectionalTcpStream>;
+  limitations: string[];
+}
 
 export interface StreamChunk {
   packetId: number;
@@ -368,6 +412,7 @@ export interface BackendPacketPayload {
   payload_len: number;
   anomaly: string | null;
   applied_rules?: unknown[];
+  frame_number?: number;
 }
 
 export interface UploadProjectResponse { project_id: string; filename: string; }
@@ -566,7 +611,9 @@ export interface EntropyStripProps {
 }
 
 export interface StreamViewerProps {
-  streams: SessionStreams;
+  result: DirectionalStreamsResponse | null;
+  status: "idle" | "loading" | "success" | "error";
+  error: string | null;
   packets: Packet[];
   selectedPacketId: number | null;
   onSelectPacket: (packet: Packet) => void;

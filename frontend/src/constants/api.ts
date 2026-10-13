@@ -12,6 +12,14 @@ export function buildSessionPacketsUrl(projectId: string, sessionId: string): st
   return `${API_BASE_URL}/project/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/packets`;
 }
 
+export function buildDirectionalStreamsUrl(
+  projectId: string,
+  sessionId: string
+): string {
+  return `${API_BASE_URL}/project/${encodeURIComponent(projectId)}` +
+    `/sessions/${encodeURIComponent(sessionId)}/streams`;
+}
+
 export function buildApplyRulesUrl(): string {
   return `${API_BASE_URL}/project/apply_rules`;
 }

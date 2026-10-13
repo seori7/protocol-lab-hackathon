@@ -1,5 +1,5 @@
 import type {
-  Session, Packet, PacketDirection,
+  Session, Packet, PacketDirection, DirectionalStreamsResponse, 
   UploadProjectResponse, SessionsListResponse, SessionPacketsResponse,
   BackendPacketPayload, BackendRuleDef, ValidateDirectionFilter,
   ApplyRulesResponse, ValidateCorpusReport, BackendProjectState,
@@ -7,7 +7,7 @@ import type {
   InfosecEntropyResponse, InfosecDiffResponse,
 } from '../types';
 import {
-  buildUploadUrl, buildSessionsUrl, buildSessionPacketsUrl,
+  buildUploadUrl, buildSessionsUrl, buildSessionPacketsUrl, buildDirectionalStreamsUrl,
   buildApplyRulesUrl, buildValidateRulesUrl, buildProjectStateUrl,
   buildExportParserUrl, buildInfosecSignaturesUrl,
   buildInfosecEntropyUrl, buildInfosecDiffUrl,
@@ -53,6 +53,7 @@ function normalizeDirection(raw: string): PacketDirection {
 function toFrontendPacket(raw: BackendPacketPayload): Packet {
   return {
     id: raw.id,
+    frame_number: raw.frame_number,
     timestamp: raw.timestamp,
     direction: normalizeDirection(raw.direction),
     payload_hex: raw.payload_hex,
@@ -80,6 +81,17 @@ export async function fetchSessionPackets(projectId: string, sessionId: string):
   const data = await fetchJson<SessionPacketsResponse>(buildSessionPacketsUrl(projectId, sessionId));
   if (!Array.isArray(data.packets)) return [];
   return data.packets.map(toFrontendPacket);
+}
+
+export async function fetchDirectionalStreams(
+  projectId: string,
+  sessionId: string,
+  signal?: AbortSignal
+): Promise<DirectionalStreamsResponse> {
+  return fetchJson<DirectionalStreamsResponse>(
+    buildDirectionalStreamsUrl(projectId, sessionId),
+    { signal }
+  );
 }
 
 export async function applyRulesOnBackend(
