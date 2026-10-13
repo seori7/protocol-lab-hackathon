@@ -30,3 +30,7 @@ dist/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Backend runtime - не коммитим
+backend/uploads/*
+!backend/uploads/.gitkeep
