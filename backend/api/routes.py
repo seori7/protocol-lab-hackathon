@@ -83,9 +83,16 @@ async def get_sessions(project_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     sessions_list = [
-        {"id": s["id"], "endpoints": s["endpoints"], "packet_count": len(s["packets"])}
-        for s in sessions_dict.values()
-    ]
+    {
+        "id": session["id"],
+        "endpoints": session["endpoints"],
+        "packet_count": len(session["packets"]),
+        "first_frame_number": session["first_frame_number"],
+        "role_status": session["role_status"],
+        "warning": session["warning"],
+    }
+    for session in sessions_dict.values()
+]
     return {"sessions": sessions_list}
 
 

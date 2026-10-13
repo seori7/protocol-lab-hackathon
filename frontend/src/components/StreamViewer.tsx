@@ -143,10 +143,10 @@ export const StreamViewer: FC<StreamViewerProps> = ({
     <div className="flex flex-col h-full bg-slate-900">
       <div className="px-4 py-3 border-b border-slate-800 shrink-0">
         <div className="font-semibold text-slate-100 text-sm tracking-wide">
-          Reassembled потоки
+          Payload по направлениям
         </div>
         <div className="text-[11px] text-slate-500 mt-0.5">
-          Склейка payload по направлениям • клик по чанку открывает пакет
+          Пока показана склейка по времени захвата. Это не восстановленный TCP-поток: повторы, пропуски и изменение порядка здесь ещё не исправлены. Клик по фрагменту открывает исходный пакет.
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-3">

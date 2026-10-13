@@ -357,6 +357,9 @@ export interface Session {
   id: string;
   endpoints: string[];
   packet_count: number;
+  first_frame_number?: number;
+  role_status?: "syn_observed" | "unknown";
+  warning?: string | null;
 }
 
 export interface BackendPacketPayload {

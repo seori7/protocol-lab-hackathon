@@ -82,7 +82,20 @@ const MOCK_PACKETS_MAP: Record<string, Packet[]> = {
 };
 
 function formatSessionLabel(session: Session): string {
-  return `${session.endpoints.join(SESSION_ENDPOINTS_SEPARATOR)} (${session.packet_count})`;
+  const startLabel =
+    session.first_frame_number === undefined
+      ? ""
+      : ` • кадр #${session.first_frame_number}`;
+
+  const roleLabel =
+    session.role_status === "unknown"
+      ? " • роли сторон не установлены"
+      : "";
+
+  return (
+    `${session.endpoints.join(SESSION_ENDPOINTS_SEPARATOR)}` +
+    `${startLabel}${roleLabel} (${session.packet_count})`
+  );
 }
 
 function convertBackendRulesToFrontend(backendRules: BackendRuleDef[]): Rule[] {
@@ -636,7 +649,6 @@ function App() {
       return;
     }
     setApplyState({ status: 'loading', matchedPackets: null, totalChecked: null, skippedEndRules: skippedEndCount, message: null });
-    // Путь 1: validate на сервере (предпочтительно, не шлем payloads)
     if (selectedSessionId) {
       try {
         const report = await validateRulesOnBackend(projectId, selectedSessionId, backendRules, "all");
@@ -732,6 +744,14 @@ function App() {
               <option key={s.id} value={s.id}>{formatSessionLabel(s)}</option>
             ))}
           </select>
+                    {selectedSession?.role_status === "unknown" && (
+            <span
+              title={selectedSession.warning ?? "Начало TCP-соединения отсутствует в записи"}
+              className="max-w-[220px] truncate text-[11px] text-amber-300"
+            >
+              ⚠ Роли C/S условные
+            </span>
+          )}
           <div className="flex rounded-md overflow-hidden border border-slate-700 shrink-0">
             <button type="button" onClick={() => setCenterViewMode('packet')} title="Один пакет"
               className={cn('px-2.5 py-1.5 text-xs font-medium cursor-pointer',
