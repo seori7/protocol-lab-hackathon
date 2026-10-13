@@ -1,0 +1,14 @@
+export const FLOW_INITIAL_PACKETS = 100;
+export const FLOW_PACKETS_STEP = 100;
+
+export const FLOW_HEX_PREVIEW_CHARS = 16;
+export const FLOW_TIMESTAMP_FRACTION_DIGITS = 3;
+export const FLOW_DELTA_MS_MULTIPLIER = 1000;
+export const FLOW_DELTA_FRACTION_DIGITS = 1;
+
+export const LENGTH_MAX_OFFSET = 64;
+export const LENGTH_MIN_PACKETS = 3;
+export const LENGTH_MIN_MATCH_RATE = 80;
+export const LENGTH_MAX_CANDIDATES = 10;
+export const LENGTH_SAMPLE_MAX_PACKETS = 200;
+export const LENGTH_PERCENT_MULTIPLIER = 100;
