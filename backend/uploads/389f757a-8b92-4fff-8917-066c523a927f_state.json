@@ -1,0 +1,13 @@
+{
+    "rules": [
+        {
+            "id": "e236ade6-a984-4334-b901-cc184d0a41b4",
+            "name": "uint32 BE 0x0001",
+            "offset": 1,
+            "length": 4,
+            "data_type": "uint32",
+            "endianness": "big"
+        }
+    ],
+    "notes": "{}"
+}
