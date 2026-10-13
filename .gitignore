@@ -30,3 +30,8 @@ dist/
 .idea/
 .DS_Store
 Thumbs.db
+
+touch backend/uploads/.gitkeep
+
+backend/uploads/*
+!backend/uploads/.gitkeep
